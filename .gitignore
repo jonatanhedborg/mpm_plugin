@@ -13,3 +13,4 @@ out/
 # Blender extension build output
 blender_addon/mpm_blender/wheels/
 dist/
+build/
