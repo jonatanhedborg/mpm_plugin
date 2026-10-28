@@ -11,6 +11,8 @@ This repository currently contains the Blender-independent core, `mpm_core`:
 - `mpm_core.cache`: the cache format (layout documented in the module docstring)
 - `mpm_core.bake`: the bake runner, `python -m mpm_core.bake CACHE_DIR [--resume]`
 
+It also contains the surfacer, `mpm_surface`, which turns a baked particle cache into meshes.
+
 The Blender add-on is the next step. `spike/` is the original throwaway prototype.
 
 ## Setup
@@ -46,6 +48,19 @@ by side, each with its name, domain box and animated colliders.
 `examples/test_scenes.py` bakes the GPU test setups (plus a few known-issue variants) into
 `out/tests/`, so you can see what the tests check: point the viewer at `out/tests`.
 
+## Surfacing
+
+```
+.venv/Scripts/python -m mpm_surface out/mix            # mesh every emitter, every baked frame
+.venv/Scripts/python -m mpm_surface out/mix --frames 1-48
+```
+
+Meshes go to `<cache>/surface/<emitter>/frame_NNNN.npz` (verts, outward triangles, per-vertex
+velocity). Settings per emitter (`enabled`, `detail`, `smoothing`, `iso`) are read from
+`<cache>/surface_settings.json` (see `mpm_surface/settings.py`); emitters not listed use the
+defaults. Re-running only re-meshes frames whose particles or settings changed. The viewer shows
+surfaced emitters as meshes, the rest as points.
+
 ## Benchmarks
 
 96 frames at 24 fps, 128³ grid, including cache and checkpoint writes.
@@ -54,6 +69,8 @@ by side, each with its name, domain box and animated colliders.
 |---|---|---|---|
 | mix | 204k | 389 ms/frame | not run yet |
 | ball | 454k | 1088 ms/frame | not run yet |
+
+Surfacing the mix scene (default settings): 30 ms/frame on the RTX 5080.
 
 The spike (fixed timestep, analytic ball) ran mix at ~430 ms/frame and ball at ~720 ms/frame. The ball
 scene is slower here because it does general mesh distance queries against the collider.

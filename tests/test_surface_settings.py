@@ -7,7 +7,7 @@ from mpm_surface.settings import SurfaceSettings, read_settings, write_settings
 
 def test_defaults_and_roundtrip():
     s = SurfaceSettings()
-    assert (s.enabled, s.detail, s.smoothing, s.iso) == (True, 1.0, 1.0, 0.5)
+    assert (s.enabled, s.detail, s.smoothing, s.iso) == (True, 1.0, 2.0, 0.5)
     assert SurfaceSettings.from_dict(s.to_dict()) == s
 
 

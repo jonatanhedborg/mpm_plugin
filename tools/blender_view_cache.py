@@ -2,7 +2,8 @@
 
 Set CACHE_DIR below (or the MPM_CACHE environment variable) to either one baked cache, or a
 folder of caches (e.g. out/tests): each cache is then laid out side by side in a grid with its
-name, domain box and animated colliders, all driven by the one timeline.
+name, domain box and animated colliders, all driven by the one timeline. Emitters that have been
+surfaced (python -m mpm_surface CACHE) show as meshes with a "velocity" attribute; others as points.
 
 Run from Blender's Text Editor. Reads the cache files directly, so the mpm_core package isn't
 needed in Blender. Re-running replaces everything in the "MPM" collection.
@@ -60,7 +61,7 @@ class CacheView:
         self._domain_box()
         self._label()
         materials = [scene_doc["materials"][e["material"]]["name"] for e in scene_doc["emitters"]]
-        self.points = [self._points(name, mat) for name, mat in zip(self.meta["emitters"], materials)]
+        self.outputs = [self._output(name, mat) for name, mat in zip(self.meta["emitters"], materials)]
         for i, c in enumerate(scene_doc["colliders"]):
             self._collider(i, c["name"], scene_doc["frame_start"])
 
@@ -88,15 +89,21 @@ class CacheView:
         label = self._child(bpy.data.objects.new(f"{self.name} label", curve))
         label.location = (self.dmin[0], self.dmin[1] - 0.12, self.dmin[2])
 
-    def _points(self, name, material_name):
+    def _output(self, name, material_name):
+        """(object, surface dir or None): a mesh object if the emitter was surfaced, else points."""
         mat = bpy.data.materials.get(f"MPM_{material_name}") or bpy.data.materials.new(f"MPM_{material_name}")
         mat.use_nodes = True
         color = PRESET_COLORS.get(material_name, FALLBACK_COLORS[len(material_name) % len(FALLBACK_COLORS)])
         mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (*color, 1)
         mat.diffuse_color = (*color, 1)  # viewport solid mode
-        ob = self._child(bpy.data.objects.new(f"{self.name} {name}", bpy.data.meshes.new(f"{self.name} {name}")))
+        me = bpy.data.meshes.new(f"{self.name} {name}")
+        me.materials.append(mat)
+        ob = self._child(bpy.data.objects.new(f"{self.name} {name}", me))
+        surface_dir = os.path.join(self.path, "surface", name)
+        if os.path.isdir(surface_dir):
+            return ob, surface_dir
         ob.modifiers.new("points", "NODES").node_group = _points_node_group(mat, self.meta["dx"] * 0.3)
-        return ob
+        return ob, None
 
     def _collider(self, i, name, frame_start):
         scene_dir = os.path.join(self.path, "scene")
@@ -119,14 +126,38 @@ class CacheView:
         if not os.path.exists(path):
             return  # not baked (yet)
         with np.load(path) as data:
-            for i, ob in enumerate(self.points):
-                pos = data[f"pos_{i}"]
-                me = ob.data
-                if len(me.vertices) != len(pos):
-                    me.clear_geometry()
-                    me.vertices.add(len(pos))
-                me.vertices.foreach_set("co", pos.ravel())
-                me.update()
+            for i, (ob, surface_dir) in enumerate(self.outputs):
+                if surface_dir is None:
+                    _set_points(ob.data, data[f"pos_{i}"])
+                    continue
+                mesh_path = os.path.join(surface_dir, f"frame_{frame:04d}.npz")
+                if os.path.exists(mesh_path):
+                    with np.load(mesh_path) as m:
+                        _set_mesh(ob.data, m["verts"], m["tris"], m["vel"])
+                else:
+                    ob.data.clear_geometry()  # not surfaced (yet)
+
+
+def _set_points(me, pos):
+    if len(me.vertices) != len(pos):
+        me.clear_geometry()
+        me.vertices.add(len(pos))
+    me.vertices.foreach_set("co", pos.ravel())
+    me.update()
+
+
+def _set_mesh(me, verts, tris, vel):
+    me.clear_geometry()
+    me.vertices.add(len(verts))
+    me.vertices.foreach_set("co", verts.ravel())
+    me.loops.add(tris.size)
+    me.loops.foreach_set("vertex_index", tris.ravel())
+    me.polygons.add(len(tris))
+    me.polygons.foreach_set("loop_start", np.arange(0, tris.size, 3, dtype=np.int32))
+    me.polygons.foreach_set("use_smooth", np.ones(len(tris), bool))
+    attr = me.attributes.get("velocity") or me.attributes.new("velocity", "FLOAT_VECTOR", "POINT")
+    attr.data.foreach_set("vector", vel.ravel())
+    me.update()
 
 
 def _points_node_group(material, radius):
