@@ -1,0 +1,13 @@
+label = "Jelly"
+
+[material]
+model = "elastic"
+youngs_modulus = 5.0e4
+poisson_ratio = 0.3
+density = 1000.0
+
+[look]
+display = "mesh"
+base_color = [0.8, 0.15, 0.2]
+roughness = 0.15
+subsurface = 0.5

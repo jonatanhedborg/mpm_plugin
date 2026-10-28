@@ -1,0 +1,16 @@
+label = "Snow, powder"
+
+[material]
+model = "snow"
+youngs_modulus = 4.0e4
+poisson_ratio = 0.2
+density = 200.0
+hardening = 10.0
+critical_compression = 3.0e-2
+critical_stretch = 2.5e-3
+
+[look]
+display = "points"
+base_color = [0.9, 0.93, 1.0]
+roughness = 0.4
+subsurface = 0.2

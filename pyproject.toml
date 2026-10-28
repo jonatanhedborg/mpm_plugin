@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpm-core"
+version = "0.1.0"
+description = "GPU Material Point Method solver core (Blender-independent)"
+requires-python = ">=3.11"
+dependencies = ["numpy", "warp-lang>=1.18"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mpm_core = ["presets/*.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["gpu: needs a CUDA device"]

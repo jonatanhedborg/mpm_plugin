@@ -1,0 +1,14 @@
+label = "Sand, dry"
+
+[material]
+model = "drucker_prager"
+youngs_modulus = 3.5e5
+poisson_ratio = 0.3
+density = 2200.0
+friction_angle_deg = 30.0
+
+[look]
+display = "points"
+base_color = [0.76, 0.6, 0.38]
+roughness = 0.9
+subsurface = 0.0

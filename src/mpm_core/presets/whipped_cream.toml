@@ -1,0 +1,14 @@
+label = "Whipped cream"
+
+[material]
+model = "von_mises"
+youngs_modulus = 1.0e5
+poisson_ratio = 0.3
+density = 400.0
+yield_stress = 2500.0
+
+[look]
+display = "mesh"
+base_color = [0.97, 0.95, 0.90]
+roughness = 0.5
+subsurface = 0.8
