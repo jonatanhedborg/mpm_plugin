@@ -16,7 +16,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix
 
-CACHE_DIR = r""  # e.g. r"D:\projects\mpm_solver\out\tests"
+CACHE_DIR = r""  # e.g. r"D:\projects\mpm_solver\out\mix"; empty = <repo>/out/tests next to this script
 COLUMNS = 5
 GAP = 0.4  # metres between domains
 
@@ -26,10 +26,21 @@ PRESET_COLORS = {"whipped_cream": (0.97, 0.93, 0.8), "sand_dry": (0.76, 0.6, 0.3
 FALLBACK_COLORS = [(0.4, 0.7, 0.4), (0.7, 0.4, 0.7), (0.9, 0.6, 0.2)]
 
 
+def _script_dir() -> str | None:
+    space = getattr(bpy.context, "space_data", None)
+    text = getattr(space, "text", None)
+    if text is not None and text.filepath:  # run from the Text Editor
+        return os.path.dirname(bpy.path.abspath(text.filepath))
+    return os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else None
+
+
 def _root() -> str:
     path = os.environ.get("MPM_CACHE") or CACHE_DIR
+    if not path and _script_dir():
+        path = os.path.join(os.path.dirname(_script_dir()), "out", "tests")
     if not path or not os.path.isdir(path):
-        raise RuntimeError(f"set CACHE_DIR (or MPM_CACHE) to a baked cache or a folder of caches, got {path!r}")
+        raise RuntimeError(f"no cache folder at {path!r}. Set the line at the top of this script, e.g. "
+                           f'CACHE_DIR = r"D:\\projects\\mpm_solver\\out\\mix" (keep the r before the quotes)')
     return path
 
 
