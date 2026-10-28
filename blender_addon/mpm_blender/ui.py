@@ -152,6 +152,7 @@ class MPM_PT_emitter_inflow(_RolePanel, bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(e, "inflow_start", text="Frame Start")
         col.prop(e, "inflow_end", text="End")
+        layout.prop(e, "inflow_substeps")
 
 
 class MPM_PT_emitter_display(_RolePanel, bpy.types.Panel):

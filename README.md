@@ -15,7 +15,8 @@ Workflow, all in the Properties editor's Physics tab, MPM panel:
 1. Add a box, set Role to **Domain** (it becomes a wireframe and is hidden from renders). Set resolution,
    quality (Preview = half resolution), walls.
 2. Add meshes, set Role to **Emitter**: Fill or Inflow, pick a material preset, tweak it. Display &
-   Surface picks points or a surface mesh (Auto follows the preset).
+   Surface picks points or a surface mesh (Auto follows the preset). Inflow **Substeps** emit several
+   times per frame, for smooth streams from moving emitters and fast flows (4 is a good start).
 3. Optionally add meshes with Role **Collider** (animated objects work).
 4. Save the .blend (the cache goes to `//mpm_cache/<domain>` by default), then **Bake** on the domain.
    Frames appear while it bakes; Cancel / Resume / Free next to it. With "Surface After Bake" on,

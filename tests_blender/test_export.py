@@ -82,10 +82,12 @@ def test_walls_and_inflow(basic):
     e.kind = "INFLOW"
     e.velocity = (0, 0, -1)
     e.inflow_start, e.inflow_end = 2, 4
+    e.inflow_substeps = 3
     s, _ = export(scene, domain)
     assert s.domain.walls["z+"] is False and s.domain.walls["z-"] is True
     em = s.emitters[0]
     assert em.kind == "inflow" and em.velocity == (0, 0, -1) and (em.frame_start, em.frame_end) == (2, 4)
+    assert em.substeps == 3
 
 
 def test_gravity_off(basic):

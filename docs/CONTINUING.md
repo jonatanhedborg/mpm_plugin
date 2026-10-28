@@ -92,13 +92,11 @@ Ideas discussed, not started:
 Solver core and bake runner:
 
 - The collider `closed` flag is trusted from the scene file rather than checked.
-- Inflow "particles outside the domain were dropped" warning repeats every frame (count in the message).
 - A fresh bake with a locked frame file (Windows) gives a confusing error.
 - No substep cap, and no up-front GPU memory estimate for the simulation grid.
 - Validation gaps: fps ≤ 0, negative friction, inflow end before start, mismatched array lengths in
   `add_particles`, empty collider meshes.
-- Inflow re-uploads all particles every frame; checkpoints are uncompressed every frame (~54 MB/frame at
-  500k particles).
+- Checkpoints are uncompressed every frame (~54 MB/frame at 500k particles).
 - A fill emitter overlapping a collider at frame 1 may cause a spike (unverified).
 
 Surfacer:

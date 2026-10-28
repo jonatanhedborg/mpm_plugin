@@ -43,3 +43,17 @@ def test_scaled_mesh_volume():  # Review Focus: scaled emitters
     m = np.diag([0.2, 0.1, 0.4, 1.0]).astype(np.float32)
     pts = sample_mesh_volume(transform_points(m, v), t, 0.01, 0)
     assert len(pts) == pytest.approx(0.2 * 0.1 * 0.4 / 0.01**3, rel=0.03)
+
+
+def test_interpolate_transform():
+    from mpm_core.geometry import interpolate_transform
+
+    a = np.diag([2.0, 2.0, 2.0, 1.0])
+    b = np.eye(4)
+    b[:3, :3] = [[0, -2, 0], [2, 0, 0], [0, 0, 2]]  # 90° about z, same scale
+    b[:3, 3] = (1, 2, 3)
+    assert np.allclose(interpolate_transform(a, b, 0), a) and np.allclose(interpolate_transform(a, b, 1), b)
+    mid = interpolate_transform(a, b, 0.5)
+    c = np.sqrt(0.5) * 2
+    assert np.allclose(mid[:3, :3], [[c, -c, 0], [c, c, 0], [0, 0, 2]], atol=1e-6)  # 45°, still scale 2
+    assert np.allclose(mid[:3, 3], (0.5, 1, 1.5))

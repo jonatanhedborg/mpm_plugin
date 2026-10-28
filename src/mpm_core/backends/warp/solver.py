@@ -10,6 +10,7 @@ import warp as wp
 
 from mpm_core.backends.warp import colliders as CK
 from mpm_core.backends.warp import kernels as K
+from mpm_core.geometry import decompose_transform
 from mpm_core.materials import MaterialParams
 from mpm_core.scene import Domain
 from mpm_core.solver import AdvanceStats, ColliderGeometry, ParticleData, Solver
@@ -18,6 +19,8 @@ PAD = 3  # padding cells around the domain so stencils never leave the grid
 CFL = 0.4
 COLLIDER_THICKNESS = 2.0  # open-mesh colliders are solid this many cells behind their surface
 _STATE_KEYS = ("x", "v", "C", "F", "Jp", "mat", "emitter")
+_ARRAY_TYPES = {"x": wp.vec3, "v": wp.vec3, "C": wp.mat33, "F": wp.mat33, "Jp": float, "mat": int, "emitter": int,
+                "p_mass": float}
 
 
 class WarpSolver(Solver):
@@ -110,8 +113,16 @@ class WarpSolver(Solver):
             "mat": material_ids,
             "emitter": np.asarray(emitter_ids, np.int32),
         }
-        old = self._download()
-        self._upload({k: np.concatenate([old[k], new[k]]) for k in _STATE_KEYS})
+        new["p_mass"] = self._density[material_ids] * self.p_vol
+        # grow on the device: only the new particles cross the bus, however many there already are
+        for key, dtype in _ARRAY_TYPES.items():
+            grown = wp.empty(self._n + n, dtype=dtype, device=self.device)
+            if self._n:
+                wp.copy(grown, getattr(self, key), count=self._n)
+            wp.copy(grown, wp.array(new[key], dtype=dtype, device=self.device), dest_offset=self._n, count=n)
+            setattr(self, key, grown)
+        self._present = np.union1d(self._present, material_ids)
+        self._n += n
 
     @property
     def particle_count(self) -> int:
@@ -245,25 +256,8 @@ class WarpSolver(Solver):
 
 
 def _decompose(m: np.ndarray) -> tuple[wp.vec3, np.ndarray, wp.mat33]:
-    """World matrix -> (translation, rotation quaternion xyzw, symmetric stretch) with M = [R S | t]."""
-    A = np.asarray(m[:3, :3], np.float64)
-    U, sig, Vt = np.linalg.svd(A)
-    if np.linalg.det(U @ Vt) < 0:  # mirrored: keep R a proper rotation, put the flip into S
-        U[:, -1] = -U[:, -1]
-        sig[-1] = -sig[-1]
-    R = U @ Vt
-    S = Vt.T @ np.diag(sig) @ Vt
-    return wp.vec3(*m[:3, 3]), _quat_from_matrix(R), wp.mat33(*S.ravel())
-
-
-def _quat_from_matrix(R: np.ndarray) -> np.ndarray:
-    """Rotation matrix -> unit quaternion (x, y, z, w)."""
-    w = np.sqrt(max(0.0, 1 + R[0, 0] + R[1, 1] + R[2, 2])) / 2
-    x = np.copysign(np.sqrt(max(0.0, 1 + R[0, 0] - R[1, 1] - R[2, 2])) / 2, R[2, 1] - R[1, 2])
-    y = np.copysign(np.sqrt(max(0.0, 1 - R[0, 0] + R[1, 1] - R[2, 2])) / 2, R[0, 2] - R[2, 0])
-    z = np.copysign(np.sqrt(max(0.0, 1 - R[0, 0] - R[1, 1] + R[2, 2])) / 2, R[1, 0] - R[0, 1])
-    q = np.array([x, y, z, w])
-    return q / np.linalg.norm(q)
+    t, q, S = decompose_transform(m)
+    return wp.vec3(*t), q, wp.mat33(*S.ravel())
 
 
 def _dp_alpha(friction_angle_deg: float) -> float:

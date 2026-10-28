@@ -117,7 +117,7 @@ def export_scene(scene, domain_obj, quality: str) -> tuple[SceneDescription, lis
             name=ob.name, kind="inflow" if inflow else "fill", material=i, mesh=mesh, transforms=transforms[i],
             velocity=tuple(e.velocity), use_object_velocity=e.use_object_velocity,
             frame_start=e.inflow_start if inflow else scene.frame_start,
-            frame_end=e.inflow_end if inflow else scene.frame_start))
+            frame_end=e.inflow_end if inflow else scene.frame_start, substeps=e.inflow_substeps if inflow else 1))
     scene_colliders = [
         Collider(name=ob.name, mesh=mesh, transforms=transforms[len(emitters) + i],
                  friction=ob.mpm.collider.friction, closed=mesh_is_closed(mesh.tris))

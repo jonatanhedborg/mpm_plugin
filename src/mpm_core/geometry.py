@@ -1,6 +1,8 @@
-"""Mesh helpers: closedness check, transforms, and volume sampling."""
+"""Mesh helpers: closedness check, transforms and their interpolation, and volume sampling."""
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -25,7 +27,67 @@ def transform_points(matrix: np.ndarray, points: np.ndarray) -> np.ndarray:
     return (np.asarray(points, np.float64) @ m[:3, :3].T + m[:3, 3]).astype(np.float32)
 
 
-def sample_mesh_volume(verts: np.ndarray, tris: np.ndarray, spacing: float, seed: int) -> np.ndarray:
+def decompose_transform(m: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """World matrix -> (translation, rotation quaternion xyzw, symmetric stretch) with M = [R S | t]."""
+    A = np.asarray(m[:3, :3], np.float64)
+    U, sig, Vt = np.linalg.svd(A)
+    if np.linalg.det(U @ Vt) < 0:  # mirrored: keep R a proper rotation, put the flip into S
+        U[:, -1] = -U[:, -1]
+        sig[-1] = -sig[-1]
+    R = U @ Vt
+    S = Vt.T @ np.diag(sig) @ Vt
+    return np.asarray(m[:3, 3], np.float64), _quat_from_matrix(R), S
+
+
+def _quat_from_matrix(R: np.ndarray) -> np.ndarray:
+    """Rotation matrix -> unit quaternion (x, y, z, w)."""
+    w = np.sqrt(max(0.0, 1 + R[0, 0] + R[1, 1] + R[2, 2])) / 2
+    x = np.copysign(np.sqrt(max(0.0, 1 + R[0, 0] - R[1, 1] - R[2, 2])) / 2, R[2, 1] - R[1, 2])
+    y = np.copysign(np.sqrt(max(0.0, 1 - R[0, 0] + R[1, 1] - R[2, 2])) / 2, R[0, 2] - R[2, 0])
+    z = np.copysign(np.sqrt(max(0.0, 1 - R[0, 0] - R[1, 1] + R[2, 2])) / 2, R[1, 0] - R[0, 1])
+    q = np.array([x, y, z, w])
+    return q / np.linalg.norm(q)
+
+
+def _matrix_from_quat(q: np.ndarray) -> np.ndarray:
+    x, y, z, w = q
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
+def _slerp(q0: np.ndarray, q1: np.ndarray, s: float) -> np.ndarray:
+    if np.dot(q0, q1) < 0:
+        q1 = -q1  # the short way round
+    d = min(float(np.dot(q0, q1)), 1.0)
+    angle = np.arccos(d)
+    if angle < 1e-6:
+        q = q0 + s * (q1 - q0)
+    else:
+        q = (np.sin((1 - s) * angle) * q0 + np.sin(s * angle) * q1) / np.sin(angle)
+    return q / np.linalg.norm(q)
+
+
+def interpolate_transform(a: np.ndarray, b: np.ndarray, s: float) -> np.ndarray:
+    """The pose a fraction ``s`` of the way from world matrix ``a`` to ``b``.
+
+    Rotation is slerped, translation and stretch lerped, the same motion the Warp backend gives colliders
+    within a frame, so a spinning object keeps its size mid-frame.
+    """
+    if s == 0:
+        return np.asarray(a, np.float32)
+    if s == 1:
+        return np.asarray(b, np.float32)
+    t0, q0, S0 = decompose_transform(a)
+    t1, q1, S1 = decompose_transform(b)
+    m = np.eye(4)
+    m[:3, :3] = _matrix_from_quat(_slerp(q0, q1, s)) @ (S0 + s * (S1 - S0))
+    m[:3, 3] = t0 + s * (t1 - t0)
+    return m.astype(np.float32)
+
+
+def sample_mesh_volume(verts: np.ndarray, tris: np.ndarray, spacing: float,
+                       seed: int | Sequence[int]) -> np.ndarray:
     """Points inside a closed mesh on a cell-centered lattice, jittered by ±0.25 spacing.
 
     The lattice is ``(i + 0.5) * spacing`` on every axis, aligned to the world origin.

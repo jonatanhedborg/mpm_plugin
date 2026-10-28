@@ -3,6 +3,7 @@
 import bpy
 
 from mpm_core.materials import list_presets, load_preset
+from mpm_core.scene import MAX_SUBSTEPS
 from mpm_core.tweaks import apply_tweaks, tweaks_for
 from mpm_surface.settings import SurfaceSettings  # no warp import
 
@@ -98,6 +99,9 @@ class MPMEmitterSettings(bpy.types.PropertyGroup):
     use_object_velocity: bpy.props.BoolProperty(name="Add Object Velocity", default=False)
     inflow_start: bpy.props.IntProperty(name="Start", default=1)
     inflow_end: bpy.props.IntProperty(name="End", default=250)
+    inflow_substeps: bpy.props.IntProperty(
+        name="Substeps", default=1, min=1, max=MAX_SUBSTEPS,
+        description="Emissions per frame. More give a smoother stream from moving emitters and fast flows")
     display: bpy.props.EnumProperty(name="Display", default="AUTO", items=[
         ("AUTO", "Auto", "As the material preset suggests"),
         ("POINTS", "Points", "Particles as small spheres"),

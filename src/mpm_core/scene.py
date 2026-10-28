@@ -26,6 +26,7 @@ from mpm_core.materials import MaterialParams
 FORMAT_VERSION = 1
 WALL_SIDES = ("x-", "x+", "y-", "y+", "z-", "z+")
 EMITTER_KINDS = ("fill", "inflow")
+MAX_SUBSTEPS = 16
 
 
 def _all_walls() -> dict[str, bool]:
@@ -87,10 +88,13 @@ class Emitter:
     use_object_velocity: bool = False
     frame_start: int = 1
     frame_end: int = 1
+    substeps: int = 1  # inflow: emissions per frame, at evenly spaced times with the pose interpolated
 
     def __post_init__(self):
         if self.kind not in EMITTER_KINDS:
             raise ValueError(f"emitter {self.name!r}: kind must be one of {EMITTER_KINDS}")
+        if not 1 <= self.substeps <= MAX_SUBSTEPS:
+            raise ValueError(f"emitter {self.name!r}: substeps must be in 1..{MAX_SUBSTEPS}")
         self.transforms = np.asarray(self.transforms, np.float32).reshape(-1, 4, 4)
         self.velocity = tuple(float(x) for x in self.velocity)
 
@@ -157,7 +161,7 @@ def write_scene(scene: SceneDescription, directory: Path) -> None:
         save_mesh_obj(f"emitter_{i}", e.mesh, e.transforms)
         emitters.append({"name": e.name, "kind": e.kind, "material": e.material, "velocity": list(e.velocity),
                          "use_object_velocity": e.use_object_velocity,
-                         "frame_start": e.frame_start, "frame_end": e.frame_end})
+                         "frame_start": e.frame_start, "frame_end": e.frame_end, "substeps": e.substeps})
     colliders = []
     for i, c in enumerate(scene.colliders):
         save_mesh_obj(f"collider_{i}", c.mesh, c.transforms)

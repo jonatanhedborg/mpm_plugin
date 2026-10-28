@@ -266,3 +266,38 @@ def test_cli_stops_when_parent_goes_away(tmp_path):  # add-on review I1: Blender
     proc.stdin.close()  # what the OS does when Blender exits
     assert proc.wait(timeout=60) == 0
     assert progress(tmp_path)["status"] == "cancelled"
+
+
+def _moving_inflow(substeps: int):
+    """A 0.1 m inflow cube moving 0.3 m along x per frame (three times its size), no gravity."""
+    scene = small_scene(kind="inflow", emit_frames=(1, 3), frame_end=3, gravity=(0, 0, 0))
+    scene.emitters[0].transforms = np.stack([translate(0.1 + 0.3 * k, 0.45, 0.45) @ scale(0.1) for k in range(3)])
+    scene.emitters[0].substeps = substeps
+    return scene
+
+
+@pytest.mark.parametrize("substeps", [1, 6])
+def test_inflow_substeps_fill_the_path(tmp_path, substeps):
+    make_cache_dir(tmp_path, _moving_inflow(substeps))
+    bake(tmp_path, backend="fake")
+    x = CacheReader(tmp_path).read_frame(3)["emitter_0"][0][:, 0]
+    covered, _ = np.histogram(x, bins=np.arange(0.1, 0.8, 0.02))
+    # one emission per frame leaves stamps with gaps between them; 6 per frame overlap into a continuous path
+    assert (covered > 0).all() == (substeps == 6)
+
+
+def test_inflow_substep_times():
+    from fractions import Fraction
+
+    from mpm_core.bake import _emission_times
+
+    scene = small_scene(kind="inflow", emit_frames=(3, 5), frame_end=6)
+    second = small_scene(kind="inflow", emit_frames=(1, 6), frame_end=6).emitters[0]
+    scene.emitters[0].substeps, second.substeps = 2, 3
+    scene.emitters.append(second)
+    F = Fraction
+    assert _emission_times(scene, 2) == [(F(1, 3), [1]), (F(2, 3), [1]), (F(1), [1])]
+    assert _emission_times(scene, 3) == [(F(1, 3), [1]), (F(2, 3), [1]), (F(1), [0, 1])]  # first frame: once
+    assert _emission_times(scene, 4) == [(F(1, 3), [1]), (F(1, 2), [0]), (F(2, 3), [1]), (F(1), [0, 1])]
+    scene.emitters.pop()
+    assert _emission_times(scene, 6) == [(F(1), [])]  # nothing emits, but the frame still advances fully
