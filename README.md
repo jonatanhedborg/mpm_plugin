@@ -2,6 +2,7 @@
 
 GPU Material Point Method simulation for Blender: whipped cream, snow, sand, jelly.
 Design: `docs/superpowers/specs/2026-10-28-mpm-blender-solver-design.md`.
+Picking this up on another machine: `docs/CONTINUING.md`.
 
 ## Blender add-on
 
