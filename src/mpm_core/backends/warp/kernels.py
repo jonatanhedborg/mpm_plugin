@@ -9,8 +9,9 @@ MODEL_ELASTIC = wp.constant(0)
 MODEL_VON_MISES = wp.constant(1)
 MODEL_DRUCKER_PRAGER = wp.constant(2)
 MODEL_SNOW = wp.constant(3)
+MODEL_ELASTIC_FRACTURE = wp.constant(4)
 
-MODEL_IDS = {"elastic": 0, "von_mises": 1, "drucker_prager": 2, "snow": 3}
+MODEL_IDS = {"elastic": 0, "von_mises": 1, "drucker_prager": 2, "snow": 3, "elastic_fracture": 4}
 
 
 @wp.func
@@ -255,6 +256,13 @@ def g2p(
         new_sig = project_von_mises(sig, m_mu[m], m_yield[m])
     elif model == MODEL_DRUCKER_PRAGER:
         new_sig = project_drucker_prager(sig, m_mu[m], m_lam[m], m_alpha[m])
+    elif model == MODEL_ELASTIC_FRACTURE:
+        # SPIKE: brittle damage. Jp is 1 while intact, 0 once cracked. Cracked material
+        # still resists compression but carries no tension, so it separates.
+        if Jp[p] > 0.5 and wp.max(wp.max(sig[0], sig[1]), sig[2]) > 1.0 + m_crit_s[m]:
+            Jp[p] = 0.0
+        if Jp[p] < 0.5:
+            new_sig = wp.vec3(wp.min(sig[0], 1.0), wp.min(sig[1], 1.0), wp.min(sig[2], 1.0))
     else:  # snow (Stomakhin et al. 2013)
         lo = 1.0 - m_crit_c[m]
         hi = 1.0 + m_crit_s[m]

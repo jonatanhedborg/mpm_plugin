@@ -11,7 +11,7 @@ import tomllib
 from dataclasses import asdict, dataclass, fields
 from importlib import resources
 
-MODELS = ("elastic", "von_mises", "drucker_prager", "snow")
+MODELS = ("elastic", "von_mises", "drucker_prager", "snow", "elastic_fracture")
 DISPLAYS = ("mesh", "points")
 
 
