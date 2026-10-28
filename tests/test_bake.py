@@ -220,3 +220,20 @@ def test_cli(tmp_path):
     out = subprocess.run([sys.executable, "-m", "mpm_core.bake", str(tmp_path)], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert CacheReader(tmp_path).available_frames() == [1, 2, 3]
+
+
+def test_fresh_bake_clears_old_meshes(tmp_path):  # surfacer review finding 1
+    make_cache_dir(tmp_path, small_scene(frame_end=3))
+    (tmp_path / "surface" / "meshes").mkdir(parents=True)
+    (tmp_path / "surface" / "meshes" / "stale.npz").write_bytes(b"old")
+    bake(tmp_path, backend="fake")
+    assert not (tmp_path / "surface").exists()
+
+
+def test_resume_keeps_meshes(tmp_path):
+    make_cache_dir(tmp_path, small_scene(frame_end=4))
+    bake(tmp_path, backend="fake", should_cancel=lambda: True)
+    (tmp_path / "surface").mkdir()
+    (tmp_path / "surface" / "keep").write_bytes(b"x")
+    bake(tmp_path, backend="fake", resume=True)
+    assert (tmp_path / "surface" / "keep").exists()

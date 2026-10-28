@@ -24,7 +24,7 @@ class SurfaceSettings:
     enabled: bool = True
     detail: float = 1.0  # field cells per particle spacing
     smoothing: float = 2.0  # scales the kernel radius (2 particle spacings); 1.0 looks lumpy, breaks thin sheets
-    iso: float = 0.5  # surface at this fraction of the rest density
+    iso: float = 0.35  # surface at this fraction of the rest density (0.5 hides sparse material at smoothing 2)
 
     def __post_init__(self):
         if not self.detail > 0:

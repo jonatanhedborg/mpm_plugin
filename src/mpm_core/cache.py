@@ -11,6 +11,7 @@ Layout of a cache directory::
     progress.json               {"status": "running|done|cancelled|error", "frame", "frame_end",
                                  "particles", "ms_per_frame", "message", "warnings": [...]}
     cancel                      if present, the runner stops after the current frame and deletes it
+    surface/                    derived meshes (mpm_surface); a fresh bake deletes it
 
 Every file is written to a ``.tmp`` sibling and then renamed, so readers never see a partial file
 and frames can be read while a bake is still running. On Windows a reader holding a file open blocks
@@ -22,6 +23,8 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +35,8 @@ FORMAT_VERSION = 1
 
 
 def _atomic_write_bytes(path: Path, write) -> None:
-    tmp = path.with_name(path.name + ".tmp")
+    # unique per writer, so two processes writing the same file can't interleave into one tmp file
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     with open(tmp, "wb") as f:
         write(f)
     for attempt in range(50):  # up to ~1 s
@@ -41,8 +45,41 @@ def _atomic_write_bytes(path: Path, write) -> None:
             return
         except PermissionError:  # Windows: a reader has the file open
             if attempt == 49:
+                tmp.unlink(missing_ok=True)
                 raise
             time.sleep(0.02)
+
+
+@contextmanager
+def exclusive_lock(path: Path):
+    """Hold an OS-level lock on ``path`` for the duration; released automatically if the process dies.
+
+    Raises RuntimeError if another holder (any process, or another handle in this one) has it.
+    """
+    f = open(path, "a+b")
+    try:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise RuntimeError(f"{path} is locked: another process is already running here") from exc
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                import msvcrt
+
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    finally:
+        f.close()
 
 
 def atomic_write_npz(path: Path, arrays: dict[str, np.ndarray]) -> None:

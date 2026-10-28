@@ -16,6 +16,10 @@ import warp as wp
 from mpm_surface.meshcache import SurfaceMesh
 from mpm_surface.settings import SurfaceSettings
 
+# Peak GPU bytes per field cell: density + velocity grids and Warp's marching cubes working set
+# (measured ~52 on an RTX 5080 with Warp 1.18).
+BYTES_PER_CELL = 56
+
 
 @wp.func
 def cubic_kernel(q: float) -> float:
@@ -95,7 +99,8 @@ def _rest_density(spacing: float, h: float) -> float:
 
 
 def surface_particles(positions: np.ndarray, velocities: np.ndarray, spacing: float, settings: SurfaceSettings,
-                      device: str | None = None, max_cells: int = 256_000_000) -> SurfaceMesh:
+                      device: str | None = None, max_bytes: int | None = None) -> SurfaceMesh:
+    """max_bytes defaults to 70% of the device's currently free memory."""
     positions = np.asarray(positions, np.float32).reshape(-1, 3)
     if len(positions) == 0:
         return SurfaceMesh.empty()
@@ -109,9 +114,13 @@ def surface_particles(positions: np.ndarray, velocities: np.ndarray, spacing: fl
     origin = positions.min(0).astype(np.float64) - pad
     dims = tuple(int(math.ceil(e / cell)) + 1 for e in positions.max(0) + pad - origin)
     cells = dims[0] * dims[1] * dims[2]
-    if cells > max_cells:
-        raise ValueError(f"surfacing needs a {dims[0]}x{dims[1]}x{dims[2]} grid ({cells:,} cells), over the "
-                         f"cell budget of {max_cells:,}; lower the detail or split the emitter")
+    needed = cells * BYTES_PER_CELL
+    if max_bytes is None:
+        max_bytes = int(0.7 * (getattr(wp.get_device(device), "free_memory", 0) or 8 * 1024**3))
+    if needed > max_bytes:
+        raise ValueError(f"surfacing needs a {dims[0]}x{dims[1]}x{dims[2]} grid ({cells:,} cells, about "
+                         f"{needed / 1e9:.1f} GB of GPU memory), over the budget of {max_bytes / 1e9:.1f} GB; "
+                         f"lower the detail or split the emitter")
 
     density = wp.zeros(dims, dtype=float, device=device)
     momentum = wp.zeros(dims, dtype=wp.vec3, device=device)

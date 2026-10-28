@@ -132,6 +132,7 @@ def bake(cache_dir: Path, *, backend: str = "warp", device: str | None = None, r
         else:
             shutil.rmtree(cache_dir / "frames", ignore_errors=True)
             shutil.rmtree(cache_dir / "state", ignore_errors=True)
+            shutil.rmtree(cache_dir / "surface", ignore_errors=True)  # meshes of the previous simulation
             (cache_dir / "frames").mkdir()
             first = scene.frame_start
 

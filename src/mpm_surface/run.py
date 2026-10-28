@@ -1,7 +1,9 @@
 """Surface runner: particle cache in, mesh cache out. Re-running only re-meshes what changed.
 
 Progress goes to ``<cache>/surface/progress.json`` (same schema as the bake runner's); creating
-``<cache>/surface/cancel`` stops the run after the current frame.
+``<cache>/surface/cancel`` stops the run after the current frame. Only one run per cache at a time
+(``<cache>/surface/lock``); a second one raises RuntimeError. Stop the surfacer before starting a
+fresh bake: the bake deletes ``surface/``.
 """
 
 from __future__ import annotations
@@ -15,9 +17,9 @@ from pathlib import Path
 
 import numpy as np
 
-from mpm_core.cache import CacheReader, write_json
+from mpm_core.cache import CacheReader, exclusive_lock, write_json
 from mpm_surface.field import surface_particles
-from mpm_surface.meshcache import MeshCacheWriter
+from mpm_surface.meshcache import MeshCacheReader, MeshCacheWriter
 from mpm_surface.settings import SurfaceSettings, read_settings
 
 
@@ -38,6 +40,18 @@ def surface(cache_dir: Path, *, settings: dict[str, SurfaceSettings] | None = No
     cache_dir = Path(cache_dir)
     surf_dir = cache_dir / "surface"
     surf_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        lock = exclusive_lock(surf_dir / "lock")
+        lock.__enter__()
+    except RuntimeError as exc:
+        raise RuntimeError(f"a surfacer run is already running on {cache_dir}") from exc
+    try:
+        return _surface_locked(cache_dir, surf_dir, settings, frames, device, should_cancel)
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def _surface_locked(cache_dir, surf_dir, settings, frames, device, should_cancel) -> SurfaceResult:
     cancel_file = surf_dir / "cancel"
     cancel_file.unlink(missing_ok=True)  # a leftover request from an earlier run
     doc = {"status": "starting", "frame": None, "frame_end": None, "particles": 0, "ms_per_frame": None,
@@ -64,11 +78,17 @@ def surface(cache_dir: Path, *, settings: dict[str, SurfaceSettings] | None = No
             if name not in reader.emitter_names:
                 doc["warnings"].append(f"surface settings for unknown emitter {name} ignored")
         resolved = {name: settings.get(name, SurfaceSettings()) for name in reader.emitter_names}
-        writer = MeshCacheWriter(cache_dir)
+        writer = MeshCacheWriter(cache_dir, reader.emitter_names)
         for name, s in resolved.items():
             if not s.enabled:
                 writer.remove_emitter(name)  # display falls back to points
         active = [name for name, s in resolved.items() if s.enabled]
+
+        particle_frames = set(reader.available_frames())
+        mesh_reader = MeshCacheReader(cache_dir)
+        for name in active:  # meshes whose particle frame is gone (shorter range, interrupted re-bake)
+            for frame in set(mesh_reader.available_frames(name)) - particle_frames:
+                writer.remove_frame(name, frame)
 
         todo = reader.available_frames()
         if frames is not None:
@@ -77,7 +97,12 @@ def surface(cache_dir: Path, *, settings: dict[str, SurfaceSettings] | None = No
         timings = []
         for index, frame in enumerate(todo):
             t0 = time.perf_counter()
-            data = reader.read_frame(frame)
+            try:
+                data = reader.read_frame(frame)
+            except FileNotFoundError:
+                doc["warnings"].append(f"particle frame {frame} disappeared during surfacing (bake restarted?); "
+                                       f"skipped")
+                continue
             meshed = False
             for name in active:
                 positions, velocities = data[name]

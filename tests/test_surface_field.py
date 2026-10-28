@@ -77,5 +77,12 @@ def test_detail_increases_triangles(device):
 @pytest.mark.gpu
 def test_too_many_cells_raises(device):  # Review Focus
     p = np.array([[0, 0, 0], [4, 4, 0.1]], np.float32)
-    with pytest.raises(ValueError, match="cell budget"):
+    with pytest.raises(ValueError, match="GPU memory"):
         surface_particles(p, np.zeros_like(p), 0.001, SurfaceSettings(detail=2), device)
+
+
+@pytest.mark.gpu
+def test_memory_budget_counts_bytes(device):  # surfacer review finding 3
+    p = sphere_particles((0.5, 0.5, 0.5), 0.05, DX)
+    with pytest.raises(ValueError, match="GPU memory"):
+        surface_particles(p, np.zeros_like(p), SPACING, SurfaceSettings(), device, max_bytes=1_000_000)

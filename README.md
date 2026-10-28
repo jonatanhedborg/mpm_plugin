@@ -55,8 +55,9 @@ by side, each with its name, domain box and animated colliders.
 .venv/Scripts/python -m mpm_surface out/mix --frames 1-48
 ```
 
-Meshes go to `<cache>/surface/<emitter>/frame_NNNN.npz` (verts, outward triangles, per-vertex
-velocity). Settings per emitter (`enabled`, `detail`, `smoothing`, `iso`) are read from
+Meshes go to `<cache>/surface/meshes/<folder>/frame_NNNN.npz` (verts, outward triangles, per-vertex
+velocity), with `surface/meshes.json` mapping emitter names to folders. Only one surfacer run per
+cache at a time; a fresh bake deletes `surface/`, so stop the surfacer before re-baking. Settings per emitter (`enabled`, `detail`, `smoothing`, `iso`) are read from
 `<cache>/surface_settings.json` (see `mpm_surface/settings.py`); emitters not listed use the
 defaults. Re-running only re-meshes frames whose particles or settings changed. The viewer shows
 surfaced emitters as meshes, the rest as points.

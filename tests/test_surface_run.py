@@ -108,3 +108,54 @@ def test_cli(particle_cache):
     out = subprocess.run([sys.executable, "-m", "mpm_surface", str(particle_cache)], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert MeshCacheReader(particle_cache).available_frames("emitter_0") == [1, 2, 3, 4]
+
+
+@pytest.mark.gpu
+def test_meshes_without_particle_frames_are_pruned(particle_cache):  # surfacer review finding 1
+    surface(particle_cache)
+    frame_path(particle_cache, 4).unlink()  # e.g. the frame range got shorter
+    surface(particle_cache)
+    assert MeshCacheReader(particle_cache).available_frames("emitter_0") == [1, 2, 3]
+
+
+@pytest.mark.gpu
+def test_awkward_emitter_names(tmp_path):  # surfacer review finding 2: names are not paths
+    names = ["cancel", "Cream", "cream", "a/b", "progress.json"]
+    write_scene(small_scene(frame_end=1), tmp_path / "scene")
+    p, ids = [], []
+    for i in range(len(names)):
+        s = sphere_particles((0.15 + 0.17 * i, 0.5, 0.5), 0.06, DX)
+        p.append(s)
+        ids.append(np.full(len(s), i, np.int32))
+    p = np.concatenate(p)
+    CacheWriter(tmp_path, names, 24, 1, 1, DX, "test").write_frame(
+        1, ParticleData(p, np.zeros_like(p), np.zeros(len(p), np.int32), np.concatenate(ids)))
+    assert surface(tmp_path).status == "done"
+    r = MeshCacheReader(tmp_path)
+    assert r.emitters() == names
+    for i, name in enumerate(names):
+        assert r.read(name, 1).verts[:, 0].mean() == pytest.approx(0.15 + 0.17 * i, abs=0.01)
+
+
+@pytest.mark.gpu
+def test_second_concurrent_run_refused(particle_cache):  # surfacer review finding 5
+    from mpm_core.cache import exclusive_lock
+
+    (particle_cache / "surface").mkdir(exist_ok=True)
+    with exclusive_lock(particle_cache / "surface" / "lock"):
+        with pytest.raises(RuntimeError, match="already running"):
+            surface(particle_cache)
+
+
+@pytest.mark.gpu
+def test_particle_frame_vanishing_mid_run(particle_cache):  # surfacer review finding 5: bake restarted
+    calls = iter(range(100))
+
+    def bake_restarts():
+        if next(calls) == 0:
+            frame_path(particle_cache, 2).unlink()
+        return False
+
+    res = surface(particle_cache, should_cancel=bake_restarts)
+    assert res.status == "done" and res.frames_written == 3
+    assert any("frame 2" in w for w in progress(particle_cache)["warnings"])

@@ -49,3 +49,24 @@ def test_atomic_write_survives_reader_holding_file(tmp_path):
     threading.Timer(0.05, reader.close).start()
     write_json(path, {"status": "done"})
     assert json.loads(path.read_text())["status"] == "done"
+
+
+def test_concurrent_writes_to_one_path(tmp_path):  # surfacer review finding 5: unique tmp names
+    path = tmp_path / "progress.json"
+    errors = []
+
+    def writer(n):
+        try:
+            for i in range(30):
+                write_json(path, {"writer": n, "i": i, "pad": "x" * 20000})
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert json.loads(path.read_text())["i"] == 29
+    assert list(tmp_path.glob("*.tmp")) == []
