@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 
 import bpy
 
+from mpm_surface.settings import SurfaceSettings, write_settings  # no warp import
+
 from . import jobs
 from .export import ExportError, cache_path, write_export
+from .props import effective_display
 
 # Called as hook(scene, domain_obj, cache_path) after a job finishes successfully. Display and
 # surfacing register here, so this module doesn't import them.
@@ -144,8 +148,89 @@ class MPM_OT_bake(_JobOperator, bpy.types.Operator):
         for hook in ON_PROGRESS:
             hook(context.scene, domain_obj, job.cache_dir)
 
+    def finish(self, context, domain_obj, job):
+        result = super().finish(context, domain_obj, job)
+        if result == {"FINISHED"} and domain_obj.mpm.domain.auto_surface and _surfaced_emitters(job.cache_dir):
+            bpy.ops.mpm.bake_surface(wait=self.wait, domain=domain_obj.name)
+        return result
+
     def done_message(self, progress) -> str:
         return f"Baked {progress.get('frame')} frames, {progress.get('particles', 0):,} particles"
+
+
+def _surfaced_emitters(cache) -> list[str]:
+    """Emitters in the cache whose object is displayed as a surface."""
+    names = json.loads((cache / "cache.json").read_text(encoding="utf-8"))["emitters"]
+    return [n for n in names if (ob := bpy.data.objects.get(n)) is not None and effective_display(ob) == "MESH"]
+
+
+def write_surface_settings(cache) -> None:
+    """surface_settings.json from each emitter object's Display & Surface settings."""
+    names = json.loads((cache / "cache.json").read_text(encoding="utf-8"))["emitters"]
+    meshed = set(_surfaced_emitters(cache))
+    settings = {}
+    for name in names:
+        ob = bpy.data.objects.get(name)
+        if ob is None:
+            settings[name] = SurfaceSettings(enabled=False)
+            continue
+        e = ob.mpm.emitter
+        settings[name] = SurfaceSettings(enabled=name in meshed, detail=e.surface_detail,
+                                         smoothing=e.surface_smoothing, iso=e.surface_iso)
+    write_settings(cache, settings)
+
+
+class MPM_OT_bake_surface(_JobOperator, bpy.types.Operator):
+    bl_idname = "mpm.bake_surface"
+    bl_label = "Bake Surface"
+    bl_description = "Turn the baked particles of emitters displayed as surfaces into meshes"
+
+    running_status = "surfacing"
+    hooks = AFTER_SURFACE
+
+    def execute(self, context):
+        domain_obj = find_domain(context, self.domain)
+        if domain_obj is None:
+            return self.fail(None, "select an MPM domain")
+        if self.busy(domain_obj):
+            return self.fail(domain_obj, "a bake or surface run is already running for this domain")
+        try:
+            cache = cache_path(domain_obj, domain_obj.mpm.domain.quality)
+        except ExportError as exc:
+            return self.fail(domain_obj, str(exc))
+        if not (cache / "cache.json").exists():
+            return self.fail(domain_obj, "nothing to surface: bake first")
+        write_surface_settings(cache)
+        return self.start_job(context, domain_obj, jobs.surface_job(cache))
+
+    def done_message(self, progress) -> str:
+        return f"Surfaced up to frame {progress.get('frame')}"
+
+
+class MPM_OT_free_surface(bpy.types.Operator):
+    bl_idname = "mpm.free_surface"
+    bl_label = "Free Surface"
+    bl_description = "Delete the surface meshes; emitters show as points again"
+
+    domain: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+
+    def execute(self, context):
+        domain_obj = find_domain(context, self.domain)
+        if domain_obj is None:
+            return {"CANCELLED"}
+        job = jobs.JOBS.get(domain_obj.name)
+        if job is not None and job.running:
+            self.report({"ERROR"}, "cancel the running job first")
+            return {"CANCELLED"}
+        try:
+            cache = cache_path(domain_obj, domain_obj.mpm.domain.quality)
+        except ExportError as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        shutil.rmtree(cache / "surface", ignore_errors=True)
+        for hook in AFTER_SURFACE:
+            hook(context.scene, domain_obj, cache)
+        return {"FINISHED"}
 
 
 class MPM_OT_cancel(bpy.types.Operator):
@@ -197,7 +282,7 @@ class MPM_OT_free_bake(bpy.types.Operator):
 
 AFTER_FREE: list = []  # hook(scene, domain_obj) after a cache was deleted
 
-CLASSES = [MPM_OT_bake, MPM_OT_cancel, MPM_OT_free_bake]
+CLASSES = [MPM_OT_bake, MPM_OT_bake_surface, MPM_OT_cancel, MPM_OT_free_bake, MPM_OT_free_surface]
 
 
 def register():

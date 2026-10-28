@@ -238,7 +238,8 @@ def _on_progress(scene, domain_obj, cache) -> None:
 
 
 _HANDLERS = [(bpy.app.handlers.load_post, on_load_post), (bpy.app.handlers.load_pre, on_load_pre)]
-_HOOKS = [(operators.AFTER_BAKE, _after_bake), (operators.AFTER_FREE, remove_outputs),
+_HOOKS = [(operators.AFTER_BAKE, _after_bake), (operators.AFTER_SURFACE, _after_bake),
+          (operators.AFTER_FREE, remove_outputs),
           (operators.ON_PROGRESS, _on_progress)]
 
 
