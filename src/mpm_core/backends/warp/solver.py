@@ -53,6 +53,12 @@ class WarpSolver(Solver):
         self.m_model = wp.array([K.MODEL_IDS[m.model] for m in self.materials], dtype=int, device=d)
         self.m_mu = wp.array(mus, dtype=float, device=d)
         self.m_lam = wp.array(lams, dtype=float, device=d)
+        self.m_yield = wp.array([m.yield_stress for m in self.materials], dtype=float, device=d)
+        self.m_alpha = wp.array([_dp_alpha(m.friction_angle_deg) for m in self.materials], dtype=float, device=d)
+        self.m_hardening = wp.array([m.hardening for m in self.materials], dtype=float, device=d)
+        self.m_max_hardening = wp.array([m.max_hardening for m in self.materials], dtype=float, device=d)
+        self.m_crit_c = wp.array([m.critical_compression for m in self.materials], dtype=float, device=d)
+        self.m_crit_s = wp.array([m.critical_stretch for m in self.materials], dtype=float, device=d)
 
         self.grid_v = wp.zeros(self.dims, dtype=wp.vec3, device=d)
         self.grid_m = wp.zeros(self.dims, dtype=float, device=d)
@@ -136,12 +142,15 @@ class WarpSolver(Solver):
         self.grid_v.zero_()
         self.grid_m.zero_()
         wp.launch(K.p2g, self._n, inputs=[self.x, self.v, self.C, self.F, self.Jp, self.mat, self.p_mass,
-                                          self.m_model, self.m_mu, self.m_lam, self.p_vol, self._origin_wp,
+                                          self.m_model, self.m_mu, self.m_lam, self.m_hardening,
+                                          self.m_max_hardening, self.p_vol, self._origin_wp,
                                           self.inv_dx, self.dx, dt, self.grid_v, self.grid_m], device=d)
         wp.launch(K.grid_update, self.dims, inputs=[self.grid_v, self.grid_m, self._origin_wp, self.dx, dt,
                                                     self._gravity_wp, self._wall_lo, self._wall_hi, self._lo_on,
                                                     self._hi_on, self.domain.wall_friction], device=d)
-        wp.launch(K.g2p, self._n, inputs=[self.x, self.v, self.C, self.F, self.grid_v, self._origin_wp,
+        wp.launch(K.g2p, self._n, inputs=[self.x, self.v, self.C, self.F, self.Jp, self.mat, self.m_model,
+                                          self.m_mu, self.m_lam, self.m_yield, self.m_alpha, self.m_crit_c,
+                                          self.m_crit_s, self.grid_v, self._origin_wp,
                                           self.inv_dx, self.dx, dt, self._wall_lo, self._wall_hi, self._lo_on,
                                           self._hi_on, self._clamp_lo, self._clamp_hi], device=d)
 
@@ -187,6 +196,11 @@ class WarpSolver(Solver):
         wp.launch(K.query_fill, len(points), inputs=[wp.array(points, dtype=wp.vec3, device=d), grid_vol,
                                                      self._origin_wp, self.inv_dx, self.dx**3, out], device=d)
         return out.numpy().astype(bool)
+
+
+def _dp_alpha(friction_angle_deg: float) -> float:
+    s = math.sin(math.radians(friction_angle_deg))
+    return math.sqrt(2 / 3) * 2 * s / (3 - s)
 
 
 def _empty_state() -> dict[str, np.ndarray]:
