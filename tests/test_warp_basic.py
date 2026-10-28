@@ -75,3 +75,28 @@ def test_is_occupied(device):
 def test_unknown_backend():
     with pytest.raises(KeyError, match="warp"):
         create_solver("nope", domain=None, materials=[], gravity=(0, 0, 0))
+
+
+@pytest.mark.gpu
+def test_nan_is_visible_in_positions(device):  # review finding 1: clamping must not hide a blow-up
+    d = Domain((0, 0, 0), (1, 1, 1), 32)
+    s = solver_with_cube(device, d, lo=(0.4, 0.4, 0.0), hi=(0.5, 0.5, 0.1))
+    state = s.save_state()
+    state["v"][0] = np.nan
+    s.load_state(state)
+    s.advance(1 / 24)
+    assert not np.isfinite(s.get_particles().positions).all()
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("zmin", [0.0, 0.0100, 0.1326, 1.0359])
+def test_wall_friction_independent_of_domain_placement(device, zmin):  # review finding 7
+    a = np.radians(20)
+    d = Domain((0, 0, zmin), (1, 1, zmin + 1), 64, wall_friction=0.5)
+    s = make_solver(device, d, [load_preset("whipped_cream").material],
+                    gravity=(9.81 * np.sin(a), 0, -9.81 * np.cos(a)))
+    p = box_particles((0.45, 0.45, zmin), (0.55, 0.55, zmin + 0.1), d.dx)
+    s.add_particles(p, np.zeros_like(p), np.zeros(len(p), np.int32), np.zeros(len(p), np.int32))
+    for _ in range(24):
+        s.advance(1 / 24)
+    assert abs(s.get_particles().positions[:, 0].mean() - p[:, 0].mean()) < 0.005

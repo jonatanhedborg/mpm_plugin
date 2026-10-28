@@ -20,7 +20,7 @@ import numpy as np
 
 from mpm_core.backends import create_solver
 from mpm_core.cache import CacheWriter, read_checkpoint, write_checkpoint, write_json
-from mpm_core.geometry import sample_mesh_volume, transform_points
+from mpm_core.geometry import mesh_is_closed, sample_mesh_volume, transform_points
 from mpm_core.scene import Emitter, SceneDescription, read_scene, scene_hash
 from mpm_core.solver import ColliderGeometry, Solver
 
@@ -37,9 +37,9 @@ class SceneChangedError(RuntimeError):
 
 
 class _Progress:
-    def __init__(self, cache_dir: Path, frame_end: int):
+    def __init__(self, cache_dir: Path):
         self.path = cache_dir / "progress.json"
-        self.doc = {"status": "running", "frame": None, "frame_end": frame_end, "particles": 0,
+        self.doc = {"status": "starting", "frame": None, "frame_end": None, "particles": 0,
                     "ms_per_frame": None, "message": "", "warnings": []}
 
     def warn(self, message: str) -> None:
@@ -57,6 +57,9 @@ def _emit(scene: SceneDescription, solver: Solver, emitter_index: int, frame: in
     spacing = scene.domain.dx / round(scene.particles_per_cell ** (1 / 3))
     seed = scene.seed + emitter_index if e.kind == "fill" else scene.seed + 1000 * frame + emitter_index
     pts = sample_mesh_volume(transform_points(e.transforms[k], e.mesh.verts), e.mesh.tris, spacing, seed)
+    if len(pts) == 0:
+        progress.warn(f"{e.name}: no particles, the mesh is smaller than the particle spacing ({spacing:.4g} m)")
+        return
 
     lo, hi = np.asarray(scene.domain.min), np.asarray(scene.domain.max)
     inside = ((pts >= lo) & (pts <= hi)).all(axis=1)
@@ -69,9 +72,10 @@ def _emit(scene: SceneDescription, solver: Solver, emitter_index: int, frame: in
         return
 
     vel = np.tile(np.asarray(e.velocity, np.float32), (len(pts), 1))
-    if e.use_object_velocity and k > 0:
+    if e.use_object_velocity and len(e.transforms) > 1:
+        a, b = (k - 1, k) if k > 0 else (0, 1)  # forward difference on the first frame
         local = transform_points(np.linalg.inv(e.transforms[k]), pts)
-        vel += (transform_points(e.transforms[k], local) - transform_points(e.transforms[k - 1], local)) * scene.fps
+        vel += (transform_points(e.transforms[b], local) - transform_points(e.transforms[a], local)) * scene.fps
     n = len(pts)
     solver.add_particles(pts, vel, np.full(n, e.material, np.int32), np.full(n, emitter_index, np.int32))
 
@@ -90,10 +94,10 @@ def bake(cache_dir: Path, *, backend: str = "warp", device: str | None = None, r
          should_cancel: Callable[[], bool] | None = None) -> BakeResult:
     cache_dir = Path(cache_dir)
     scene_dir = cache_dir / "scene"
-    scene = read_scene(scene_dir)
-    current_hash = scene_hash(scene_dir)
-    progress = _Progress(cache_dir, scene.frame_end)
     cancel_file = cache_dir / "cancel"
+    cancel_file.unlink(missing_ok=True)  # a leftover request from an earlier bake
+    progress = _Progress(cache_dir)
+    progress.update()  # replace the previous bake's status right away
     written = 0
 
     def cancelled() -> bool:
@@ -103,6 +107,13 @@ def bake(cache_dir: Path, *, backend: str = "warp", device: str | None = None, r
         return bool(should_cancel and should_cancel())
 
     try:
+        scene = read_scene(scene_dir)
+        current_hash = scene_hash(scene_dir)
+        progress.doc["frame_end"] = scene.frame_end
+        for e in scene.emitters:
+            if not mesh_is_closed(e.mesh.tris):
+                raise ValueError(f"emitter {e.name!r}: mesh is not closed (every edge must be shared by exactly "
+                                 f"two triangles; in Blender, try Merge by Distance)")
         solver = create_solver(backend, domain=scene.domain, materials=scene.materials, gravity=scene.gravity,
                                particles_per_cell=scene.particles_per_cell, device=device)
         solver.set_colliders([ColliderGeometry(c.mesh, c.closed, c.friction) for c in scene.colliders])
@@ -136,7 +147,7 @@ def bake(cache_dir: Path, *, backend: str = "warp", device: str | None = None, r
             for i in _active_emitters(scene, frame):
                 _emit(scene, solver, i, frame, progress)
             particles = solver.get_particles()
-            if not np.isfinite(particles.positions).all():
+            if not (np.isfinite(particles.positions).all() and np.isfinite(particles.velocities).all()):
                 message = f"simulation became unstable at frame {frame} (NaN/inf in particle positions)"
                 progress.update(status="error", frame=frame, message=message)
                 return BakeResult("error", written, message)
@@ -144,7 +155,7 @@ def bake(cache_dir: Path, *, backend: str = "warp", device: str | None = None, r
             write_checkpoint(cache_dir, frame, solver.save_state(), current_hash)
             written += 1
             timings.append((time.perf_counter() - t0) * 1000)
-            progress.update(frame=frame, particles=len(particles.positions),
+            progress.update(status="running", frame=frame, particles=len(particles.positions),
                             ms_per_frame=round(float(np.mean(timings)), 1))
             if frame < scene.frame_end and cancelled():
                 progress.update(status="cancelled")

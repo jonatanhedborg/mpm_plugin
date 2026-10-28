@@ -156,26 +156,26 @@ def wall_contact(vel: wp.vec3, axis: int, friction: float) -> wp.vec3:
 def grid_update(
     grid_v: wp.array3d(dtype=wp.vec3),
     grid_m: wp.array3d(dtype=float),
-    origin: wp.vec3,
-    dx: float,
     dt: float,
     gravity: wp.vec3,
-    wall_lo: wp.vec3,
-    wall_hi: wp.vec3,
+    wall_lo_node: wp.vec3i,
+    wall_hi_node: wp.vec3i,
     lo_on: wp.vec3i,
     hi_on: wp.vec3i,
     wall_friction: float,
 ):
+    """Walls act on nodes at or beyond the wall, chosen by node index so float rounding of the
+    domain placement never drops the node that sits exactly on the wall."""
     i, j, k = wp.tid()
     m = grid_m[i, j, k]
     if m <= 0.0:
         return
     vel = grid_v[i, j, k] / m + dt * gravity
-    pos = origin + wp.vec3(float(i), float(j), float(k)) * dx
+    node = wp.vec3i(i, j, k)
     for a in range(3):
-        if lo_on[a] != 0 and pos[a] <= wall_lo[a] and vel[a] < 0.0:
+        if lo_on[a] != 0 and node[a] <= wall_lo_node[a] and vel[a] < 0.0:
             vel = wall_contact(vel, a, wall_friction)
-        if hi_on[a] != 0 and pos[a] >= wall_hi[a] and vel[a] > 0.0:
+        if hi_on[a] != 0 and node[a] >= wall_hi_node[a] and vel[a] > 0.0:
             vel = wall_contact(vel, a, wall_friction)
     grid_v[i, j, k] = vel
 
@@ -233,9 +233,12 @@ def g2p(
             nx[a] = wall_lo[a]
         if hi_on[a] != 0 and nx[a] > wall_hi[a]:
             nx[a] = wall_hi[a]
-    # keep the stencil inside the padded grid (only matters past open sides)
-    x[p] = wp.vec3(wp.clamp(nx[0], clamp_lo[0], clamp_hi[0]), wp.clamp(nx[1], clamp_lo[1], clamp_hi[1]),
-                   wp.clamp(nx[2], clamp_lo[2], clamp_hi[2]))
+    # keep the stencil inside the padded grid (only matters past open sides); clamp would turn NaN into a
+    # finite corner and hide a blow-up from the NaN check, so non-finite positions are stored as they are
+    if wp.isfinite(nx[0]) and wp.isfinite(nx[1]) and wp.isfinite(nx[2]):
+        nx = wp.vec3(wp.clamp(nx[0], clamp_lo[0], clamp_hi[0]), wp.clamp(nx[1], clamp_lo[1], clamp_hi[1]),
+                     wp.clamp(nx[2], clamp_lo[2], clamp_hi[2]))
+    x[p] = nx
     Fn = (wp.identity(n=3, dtype=float) + dt * new_C) * F[p]
 
     m = mat[p]

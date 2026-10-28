@@ -13,13 +13,15 @@ Layout of a cache directory::
     cancel                      if present, the runner stops after the current frame and deletes it
 
 Every file is written to a ``.tmp`` sibling and then renamed, so readers never see a partial file
-and frames can be read while a bake is still running.
+and frames can be read while a bake is still running. On Windows a reader holding a file open blocks
+the rename for a moment: the writer retries, and readers should likewise retry on PermissionError.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +35,14 @@ def _atomic_write_bytes(path: Path, write) -> None:
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "wb") as f:
         write(f)
-    os.replace(tmp, path)
+    for attempt in range(50):  # up to ~1 s
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:  # Windows: a reader has the file open
+            if attempt == 49:
+                raise
+            time.sleep(0.02)
 
 
 def write_json(path: Path, doc: dict) -> None:

@@ -43,6 +43,11 @@ class WarpSolver(Solver):
         self._clamp_lo = wp.vec3(*(self.origin + self.dx))
         self._clamp_hi = wp.vec3(*(self.origin + (np.asarray(self.dims) - 2) * self.dx))
         self._origin_wp = wp.vec3(*self.origin)
+        # last node index at/below each lo wall and first at/above each hi wall
+        self._wall_lo_node = wp.vec3i(*(int(math.floor((lo - o) / self.dx + 1e-3))
+                                        for lo, o in zip(domain.min, self.origin)))
+        self._wall_hi_node = wp.vec3i(*(int(math.ceil((hi - o) / self.dx - 1e-3))
+                                        for hi, o in zip(domain.max, self.origin)))
         self._gravity_wp = wp.vec3(*self.gravity)
 
         mus, lams = zip(*(m.lame() for m in self.materials)) if self.materials else ((), ())
@@ -141,10 +146,17 @@ class WarpSolver(Solver):
         if len(start) != len(self._meshes) or len(end) != len(self._meshes):
             raise ValueError(f"expected {len(self._meshes)} collider transforms")
         d = self.device
-        self._c_xf0 = wp.array(start, dtype=wp.mat44, device=d)
-        self._c_xf1 = wp.array(end, dtype=wp.mat44, device=d)
+        poses = []
+        for a, b in zip(start, end):
+            pose = CK.ColliderPose()
+            (pose.t0, q0, pose.S0), (pose.t1, q1, pose.S1) = _decompose(a), _decompose(b)
+            if np.dot(q0, q1) < 0:
+                q1 = -q1  # slerp the short way round
+            pose.q0, pose.q1 = wp.quat(*q0), wp.quat(*q1)
+            poses.append(pose)
+        self._c_poses = wp.array(poses, dtype=CK.ColliderPose, device=d)
         # AABB early-out margin in local units: a few cells, scaled by the largest inverse scale
-        inv_scale = [max(1.0 / np.linalg.svd(m[:3, :3], compute_uv=False).min() for m in (a, b))
+        inv_scale = [max(1.0 / max(np.linalg.svd(m[:3, :3], compute_uv=False).min(), 1e-12) for m in (a, b))
                      for a, b in zip(start, end)]
         self._c_margin = wp.array([3.0 * self.dx * k for k in inv_scale], dtype=float, device=d)
 
@@ -154,6 +166,8 @@ class WarpSolver(Solver):
         self._vmax.zero_()
         wp.launch(K.max_speed, self._n, inputs=[self.v, self._vmax], device=self.device)
         vmax = float(self._vmax.numpy()[0])
+        if not math.isfinite(vmax):
+            vmax = 0.0  # already blown up; keep stepping so the NaN reaches the positions and gets reported
         c = float(self._wave_speed[self._present].max())
         dt = min(CFL * self.dx / (c + vmax), frame_dt)
         steps = math.ceil(frame_dt / dt - 1e-9)
@@ -167,12 +181,12 @@ class WarpSolver(Solver):
                                           self.m_model, self.m_mu, self.m_lam, self.m_hardening,
                                           self.m_max_hardening, self.p_vol, self._origin_wp,
                                           self.inv_dx, self.dx, dt, self.grid_v, self.grid_m], device=d)
-        wp.launch(K.grid_update, self.dims, inputs=[self.grid_v, self.grid_m, self._origin_wp, self.dx, dt,
-                                                    self._gravity_wp, self._wall_lo, self._wall_hi, self._lo_on,
+        wp.launch(K.grid_update, self.dims, inputs=[self.grid_v, self.grid_m, dt, self._gravity_wp,
+                                                    self._wall_lo_node, self._wall_hi_node, self._lo_on,
                                                     self._hi_on, self.domain.wall_friction], device=d)
         if self._meshes:
             wp.launch(CK.grid_colliders, self.dims, inputs=[
-                self.grid_v, self.grid_m, self._origin_wp, self.dx, self._c_ids, self._c_xf0, self._c_xf1,
+                self.grid_v, self.grid_m, self._origin_wp, self.dx, self._c_ids, self._c_poses,
                 self._c_closed, self._c_friction, self._c_lo, self._c_hi, self._c_margin, COLLIDER_THICKNESS * self.dx,
                 self.dx, s, 1.0 / self._frame_dt], device=d)
         wp.launch(K.g2p, self._n, inputs=[self.x, self.v, self.C, self.F, self.Jp, self.mat, self.m_model,
@@ -182,7 +196,7 @@ class WarpSolver(Solver):
                                           self._hi_on, self._clamp_lo, self._clamp_hi], device=d)
         if self._meshes:
             wp.launch(CK.project_particles, self._n, inputs=[
-                self.x, self.v, self._c_ids, self._c_xf0, self._c_xf1, self._c_closed, self._c_lo, self._c_hi,
+                self.x, self.v, self._c_ids, self._c_poses, self._c_closed, self._c_lo, self._c_hi,
                 self._c_margin, COLLIDER_THICKNESS * self.dx, s, 1.0 / self._frame_dt], device=d)
 
     def advance(self, frame_dt: float) -> AdvanceStats:
@@ -228,6 +242,28 @@ class WarpSolver(Solver):
         wp.launch(K.query_fill, len(points), inputs=[wp.array(points, dtype=wp.vec3, device=d), grid_vol,
                                                      self._origin_wp, self.inv_dx, self.dx**3, out], device=d)
         return out.numpy().astype(bool)
+
+
+def _decompose(m: np.ndarray) -> tuple[wp.vec3, np.ndarray, wp.mat33]:
+    """World matrix -> (translation, rotation quaternion xyzw, symmetric stretch) with M = [R S | t]."""
+    A = np.asarray(m[:3, :3], np.float64)
+    U, sig, Vt = np.linalg.svd(A)
+    if np.linalg.det(U @ Vt) < 0:  # mirrored: keep R a proper rotation, put the flip into S
+        U[:, -1] = -U[:, -1]
+        sig[-1] = -sig[-1]
+    R = U @ Vt
+    S = Vt.T @ np.diag(sig) @ Vt
+    return wp.vec3(*m[:3, 3]), _quat_from_matrix(R), wp.mat33(*S.ravel())
+
+
+def _quat_from_matrix(R: np.ndarray) -> np.ndarray:
+    """Rotation matrix -> unit quaternion (x, y, z, w)."""
+    w = np.sqrt(max(0.0, 1 + R[0, 0] + R[1, 1] + R[2, 2])) / 2
+    x = np.copysign(np.sqrt(max(0.0, 1 + R[0, 0] - R[1, 1] - R[2, 2])) / 2, R[2, 1] - R[1, 2])
+    y = np.copysign(np.sqrt(max(0.0, 1 - R[0, 0] + R[1, 1] - R[2, 2])) / 2, R[0, 2] - R[2, 0])
+    z = np.copysign(np.sqrt(max(0.0, 1 - R[0, 0] - R[1, 1] + R[2, 2])) / 2, R[1, 0] - R[0, 1])
+    q = np.array([x, y, z, w])
+    return q / np.linalg.norm(q)
 
 
 def _dp_alpha(friction_angle_deg: float) -> float:

@@ -4,7 +4,7 @@ import sys
 
 import numpy as np
 import pytest
-from helpers import small_scene
+from helpers import scale, small_scene, translate
 
 from mpm_core.backends import register_backend
 from mpm_core.bake import SceneChangedError, bake
@@ -110,10 +110,73 @@ def test_resume_continues_simulation(tmp_path):
 
 def test_cancel_file(tmp_path):
     make_cache_dir(tmp_path, small_scene(frame_end=6))
-    (tmp_path / "cancel").touch()
-    assert bake(tmp_path, backend="fake").status == "cancelled"
+    calls = iter(range(100))
+
+    def add_on_requests_cancel():  # the add-on creates the file while the bake runs
+        if next(calls) == 1:
+            (tmp_path / "cancel").touch()
+        return False
+
+    res = bake(tmp_path, backend="fake", should_cancel=add_on_requests_cancel)
+    assert res.status == "cancelled" and res.frames_written == 3  # seen after the next frame
     assert not (tmp_path / "cancel").exists()
     assert progress(tmp_path)["status"] == "cancelled"
+
+
+def test_stale_cancel_file_ignored(tmp_path):  # review finding 3
+    make_cache_dir(tmp_path, small_scene(frame_end=4))
+    (tmp_path / "cancel").touch()  # left over from an earlier bake
+    assert bake(tmp_path, backend="fake").status == "done"
+
+
+def test_progress_reset_at_start(tmp_path):  # review finding 4
+    make_cache_dir(tmp_path, small_scene(frame_end=3))
+    bake(tmp_path, backend="fake")
+    seen = []
+
+    def factory(**kw):
+        seen.append(progress(tmp_path)["status"])  # what the add-on sees while the solver starts up
+        return FakeSolver(**kw)
+
+    register_backend("fake_probe", factory)
+    bake(tmp_path, backend="fake_probe")
+    assert seen == ["starting"]
+
+
+def test_unreadable_scene_reports_error(tmp_path):  # review finding 4
+    make_cache_dir(tmp_path, small_scene(frame_end=3))
+    (tmp_path / "scene" / "scene.json").write_text("{ not json")
+    with pytest.raises(ValueError):
+        bake(tmp_path, backend="fake")
+    assert progress(tmp_path)["status"] == "error"
+
+
+def test_open_inflow_mesh_fails_before_baking(tmp_path):  # review finding 5
+    scene = small_scene(kind="inflow", emit_frames=(3, 4), frame_end=5)
+    scene.emitters[0].mesh.tris = scene.emitters[0].mesh.tris[:-2]
+    make_cache_dir(tmp_path, scene)
+    with pytest.raises(ValueError, match="emitter_0.*not closed"):
+        bake(tmp_path, backend="fake")
+    assert not list((tmp_path / "frames").glob("*.npz"))
+
+
+def test_emitter_smaller_than_spacing_warns(tmp_path):  # review finding 6
+    scene = small_scene(frame_end=2)
+    scene.emitters[0].transforms[:] = translate(0.5, 0.5, 0.5) @ scale(0.002)
+    make_cache_dir(tmp_path, scene)
+    bake(tmp_path, backend="fake")
+    assert any("emitter_0" in w and "no particles" in w for w in progress(tmp_path)["warnings"])
+
+
+def test_fill_object_velocity(tmp_path):  # review finding 14
+    scene = small_scene(frame_end=3)
+    e = scene.emitters[0]
+    e.use_object_velocity = True
+    e.transforms = np.stack([translate(0.1 * f, 0, 0) @ e.transforms[0] for f in range(3)])  # 2.4 m/s in x
+    make_cache_dir(tmp_path, scene)
+    bake(tmp_path, backend="fake")
+    vel = CacheReader(tmp_path).read_frame(1)["emitter_0"][1]
+    assert np.allclose(vel[:, 0], 2.4, atol=1e-3)
 
 
 def test_resume_refuses_changed_scene(tmp_path):  # Review Focus

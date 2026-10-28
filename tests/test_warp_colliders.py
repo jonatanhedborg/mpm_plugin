@@ -90,3 +90,32 @@ def test_moving_box_clears_sand(device):
         s.advance(1 / 24)
     inside = points_in_box(s.get_particles().positions, box(0.45))
     assert inside.sum() <= 0.001 * s.particle_count
+
+
+def rot_x(degrees: float) -> np.ndarray:
+    a = np.radians(degrees)
+    m = np.eye(4, dtype=np.float32)
+    m[1, 1], m[1, 2], m[2, 1], m[2, 2] = np.cos(a), -np.sin(a), np.sin(a), np.cos(a)
+    return m
+
+
+@pytest.mark.gpu
+def test_spinning_sphere_does_not_disturb_sand(device):  # review finding 8: no mid-frame shrink when rotating
+    from helpers import icosphere
+
+    r = 0.12
+
+    def displacement(deg_per_frame):
+        ball = lambda deg: translate(0.5, 0.5, 0.1) @ rot_x(deg) @ scale(r)  # noqa: E731
+        s = sand_layer(device, lo=(0.25, 0.25, 0), hi=(0.75, 0.75, 0.15))
+        s.set_colliders([ColliderGeometry(MeshData(*icosphere(1.0, 5)), closed=True, friction=0.0)])
+        s.set_collider_transforms(ball(0)[None], ball(0)[None])
+        s.advance(1 / 24)  # let the sand settle around the ball first
+        start = s.get_particles().positions.copy()
+        for f in range(6):
+            s.set_collider_transforms(ball(deg_per_frame * f)[None], ball(deg_per_frame * (f + 1))[None])
+            s.advance(1 / 24)
+        return np.linalg.norm(s.get_particles().positions - start, axis=1).mean()
+
+    # a frictionless sphere spinning in place should leave the sand where it is
+    assert displacement(90) < displacement(0) + 0.25 * DX

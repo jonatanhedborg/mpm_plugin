@@ -1,6 +1,11 @@
-import numpy as np
+import json
+import sys
+import threading
 
-from mpm_core.cache import CacheReader, CacheWriter, read_checkpoint, write_checkpoint
+import numpy as np
+import pytest
+
+from mpm_core.cache import CacheReader, CacheWriter, read_checkpoint, write_checkpoint, write_json
 from mpm_core.solver import ParticleData
 
 
@@ -33,3 +38,14 @@ def test_checkpoint_roundtrip(tmp_path):
 
 def test_no_checkpoint(tmp_path):
     assert read_checkpoint(tmp_path) is None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows file locking")
+def test_atomic_write_survives_reader_holding_file(tmp_path):
+    # the add-on polls progress.json; on Windows an open handle blocks os.replace
+    path = tmp_path / "progress.json"
+    write_json(path, {"status": "running"})
+    reader = open(path, "rb")
+    threading.Timer(0.05, reader.close).start()
+    write_json(path, {"status": "done"})
+    assert json.loads(path.read_text())["status"] == "done"
