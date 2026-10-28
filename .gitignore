@@ -5,3 +5,6 @@ __pycache__/
 # simulation caches and renders
 spike/cache*/
 spike/renders/
+
+# example bakes
+out/
