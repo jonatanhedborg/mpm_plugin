@@ -40,7 +40,11 @@ GPU tests are marked `gpu` and skipped when no CUDA device is found.
 ```
 
 To look at a cache in Blender, open `tools/blender_view_cache.py` in the Text Editor, set
-`CACHE_DIR`, and run it.
+`CACHE_DIR`, and run it. `CACHE_DIR` can also be a folder of caches, which are then laid out side
+by side, each with its name, domain box and animated colliders.
+
+`examples/test_scenes.py` bakes the GPU test setups (plus a few known-issue variants) into
+`out/tests/`, so you can see what the tests check: point the viewer at `out/tests`.
 
 ## Benchmarks
 

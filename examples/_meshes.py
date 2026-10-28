@@ -22,6 +22,19 @@ def rot_y(radians: float) -> np.ndarray:
     return m
 
 
+def rot_x(radians: float) -> np.ndarray:
+    c, s = np.cos(radians), np.sin(radians)
+    m = np.eye(4, dtype=np.float32)
+    m[1, 1], m[1, 2], m[2, 1], m[2, 2] = c, -s, s, c
+    return m
+
+
+def plane_mesh() -> MeshData:
+    """Open unit square in the xy plane centered at the origin, normal +z."""
+    v = np.array([[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0]], np.float32)
+    return MeshData(v, np.array([[0, 1, 2], [0, 2, 3]], np.int32))
+
+
 def box_mesh() -> MeshData:
     """Unit cube [0,1]^3, outward winding."""
     v = np.array([[x, y, z] for z in (0, 1) for y in (0, 1) for x in (0, 1)], np.float32)
