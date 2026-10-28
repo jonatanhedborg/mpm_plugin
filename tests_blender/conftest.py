@@ -48,3 +48,24 @@ def add_sphere(name, location=(0, 0, 0), radius=0.1):
 
 def add_plane(name, location=(0, 0, 0), size=1.0):
     return _add(bpy.ops.mesh.primitive_plane_add, name, size=size, location=location)
+
+
+def small_scene(scene, tmp_path, frames=4, resolution=16):
+    """0.5 m domain (z 0..0.5), jelly cube emitter, FINAL quality, absolute cache folder."""
+    scene.frame_end = frames
+    domain = add_cube("Domain", location=(0, 0, 0.25), size=0.5)
+    domain.mpm.role = "DOMAIN"
+    domain.mpm.domain.resolution = resolution
+    domain.mpm.domain.quality = "FINAL"
+    domain.mpm.domain.cache_dir = str(tmp_path / "cache")
+    domain.mpm.domain.auto_surface = False
+    emitter = add_cube("Emitter", location=(0, 0, 0.15), size=0.1)
+    emitter.mpm.role = "EMITTER"
+    emitter.mpm.emitter.preset = "jelly"
+    return domain, emitter
+
+
+def cache_of(domain):
+    from mpm_blender.export import cache_path
+
+    return cache_path(domain, domain.mpm.domain.quality)

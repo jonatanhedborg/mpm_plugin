@@ -13,6 +13,7 @@ from .export import ExportError, cache_path, write_export
 # surfacing register here, so this module doesn't import them.
 AFTER_BAKE: list = []
 AFTER_SURFACE: list = []
+ON_PROGRESS: list = []  # hook(scene, domain_obj, cache_path) while a bake runs, so new frames show up
 
 
 def find_domain(context, name: str):
@@ -138,6 +139,10 @@ class MPM_OT_bake(_JobOperator, bpy.types.Operator):
         except ExportError as exc:
             return self.fail(domain_obj, str(exc))
         return self.start_job(context, domain_obj, jobs.bake_job(path, self.resume))
+
+    def on_progress(self, context, domain_obj, job):
+        for hook in ON_PROGRESS:
+            hook(context.scene, domain_obj, job.cache_dir)
 
     def done_message(self, progress) -> str:
         return f"Baked {progress.get('frame')} frames, {progress.get('particles', 0):,} particles"
