@@ -99,8 +99,10 @@ class CacheView:
         me = bpy.data.meshes.new(f"{self.name} {name}")
         me.materials.append(mat)
         ob = self._child(bpy.data.objects.new(f"{self.name} {name}", me))
-        surface_dir = os.path.join(self.path, "surface", name)
-        if os.path.isdir(surface_dir):
+        manifest = os.path.join(self.path, "surface", "meshes.json")
+        folder = json.load(open(manifest))["emitters"].get(name) if os.path.exists(manifest) else None
+        surface_dir = os.path.join(self.path, "surface", "meshes", folder) if folder else ""
+        if folder and os.path.isdir(surface_dir):
             return ob, surface_dir
         ob.modifiers.new("points", "NODES").node_group = _points_node_group(mat, self.meta["dx"] * 0.3)
         return ob, None
