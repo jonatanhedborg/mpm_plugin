@@ -11,7 +11,11 @@ blender_version_min = "5.2.0"
 platforms = ["windows-x64", "linux-x64"]
 
 # filled in by tools/build_extension.py
-wheels = []
+wheels = [
+  "./wheels/mpm_core-0.1.0-py3-none-any.whl",
+  "./wheels/warp_lang-1.18.0-py3-none-manylinux_2_28_x86_64.whl",
+  "./wheels/warp_lang-1.18.0-py3-none-win_amd64.whl",
+]
 
 [permissions]
 files = "Read and write simulation caches"

@@ -3,7 +3,41 @@
 GPU Material Point Method simulation for Blender: whipped cream, snow, sand, jelly.
 Design: `docs/superpowers/specs/2026-10-28-mpm-blender-solver-design.md`.
 
-This repository currently contains the Blender-independent core, `mpm_core`:
+## Blender add-on
+
+Install: build the extension (see Building below), then in Blender 5.2 go to Edit → Preferences →
+Get Extensions → (dropdown) Install from Disk, and pick `dist/mpm_blender-0.1.0-windows_x64.zip`
+(or `-linux_x64.zip`). Needs an NVIDIA GPU.
+
+Workflow, all in the Properties editor's Physics tab, MPM panel:
+
+1. Add a box, set Role to **Domain**. Set resolution, quality (Preview = half resolution), walls.
+2. Add meshes, set Role to **Emitter**: Fill or Inflow, pick a material preset, tweak it. Display &
+   Surface picks points or a surface mesh (Auto follows the preset).
+3. Optionally add meshes with Role **Collider** (animated objects work).
+4. Save the .blend (the cache goes to `//mpm_cache/<domain>` by default), then **Bake** on the domain.
+   Frames appear while it bakes; Cancel / Resume / Free next to it. With "Surface After Bake" on,
+   surface meshes are made right after; **Bake Surface** re-makes them after changing surface settings.
+
+Output objects appear in a collection `MPM <domain>`, with materials `MPM <preset>` that you can edit
+freely (re-bakes keep them). Surface meshes carry a `velocity` attribute for motion blur.
+
+Add-on tests run inside headless Blender:
+
+```
+.venv/Scripts/python tools/setup_blender_test_env.py    # once
+.venv/Scripts/python tools/blender_tests.py             # pytest args pass through
+```
+
+## Building
+
+```
+.venv/Scripts/python tools/build_extension.py          # -> dist/mpm_blender-0.1.0-{windows,linux}_x64.zip
+```
+
+## Core libraries
+
+The add-on runs on the Blender-independent core, `mpm_core`:
 
 - `mpm_core.materials`: material parameters and presets (`src/mpm_core/presets/*.toml`)
 - `mpm_core.scene`: the scene description the Blender add-on writes
@@ -13,7 +47,7 @@ This repository currently contains the Blender-independent core, `mpm_core`:
 
 It also contains the surfacer, `mpm_surface`, which turns a baked particle cache into meshes.
 
-The Blender add-on is the next step. `spike/` is the original throwaway prototype.
+`spike/` is the original throwaway prototype.
 
 ## Setup
 
