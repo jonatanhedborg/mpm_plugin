@@ -34,8 +34,10 @@ class Job:
         self.progress_path.unlink(missing_ok=True)  # never show the previous run's status
         self._log = open(self.log_path, "wb")
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        # stdin stays an open pipe we never write to: when Blender exits the OS closes it and the child
+        # (started with --watch-stdin) stops, so no orphan bake keeps writing the cache
         self.proc = subprocess.Popen(self.argv, env=self.env, stdout=self._log, stderr=subprocess.STDOUT,
-                                     stdin=subprocess.DEVNULL, creationflags=flags)
+                                     stdin=subprocess.PIPE, creationflags=flags)
 
     @property
     def running(self) -> bool:
@@ -62,6 +64,8 @@ class Job:
 
     def wait(self) -> int:
         code = self.proc.wait() if self.proc else 0
+        if self.proc and self.proc.stdin and not self.proc.stdin.closed:
+            self.proc.stdin.close()
         if self._log:
             self._log.close()
             self._log = None
@@ -87,18 +91,18 @@ class Job:
 
 def bake_job(cache: Path, resume: bool) -> Job:
     cache = Path(cache)
-    argv = [sys.executable, "-m", "mpm_core.bake", str(cache)] + (["--resume"] if resume else [])
+    argv = [sys.executable, "-m", "mpm_core.bake", str(cache), "--watch-stdin"] + (["--resume"] if resume else [])
     return Job("bake", cache, argv, cache / "bake.log", cache / "progress.json", cache / "cancel")
 
 
 def surface_job(cache: Path) -> Job:
     cache = Path(cache)
-    argv = [sys.executable, "-m", "mpm_surface", str(cache)]
+    argv = [sys.executable, "-m", "mpm_surface", str(cache), "--watch-stdin"]
     surf = cache / "surface"
     return Job("surface", cache, argv, surf / "surface.log", surf / "progress.json", surf / "cancel")
 
 
-JOBS: dict[str, Job] = {}  # domain object name -> its running (or last) job
+JOBS: dict[str, Job] = {}  # domain uid (MPMDomainSettings.uid) -> its running (or last) job
 
 
 def cancel_all() -> None:

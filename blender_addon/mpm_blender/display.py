@@ -12,6 +12,7 @@ import json
 import time
 import traceback
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import bpy
@@ -24,6 +25,20 @@ from . import jobs, operators
 from .export import ExportError, cache_path
 
 POINTS_MODIFIER = "MPM Points"
+RUNNING_STATUSES = ("starting", "running", "surfacing")
+
+_LOADED: dict[int, tuple[str, float]] = {}  # output object session_uid -> (file, mtime) it shows
+_SUSPENDED = [0]
+
+
+@contextmanager
+def suspended():
+    """No playback loads inside (scene.frame_set while exporting would reload the old cache every frame)."""
+    _SUSPENDED[0] += 1
+    try:
+        yield
+    finally:
+        _SUSPENDED[0] -= 1
 
 
 def _retry(read, attempts: int = 5):
@@ -49,13 +64,24 @@ def _cache_of(domain_obj) -> Path | None:
     return path if (path / "cache.json").exists() else None
 
 
+def output_collection(domain_obj):
+    """The domain's output collection, found by the domain's persistent id (renames don't lose it)."""
+    uid = domain_obj.mpm.domain.uid
+    if not uid:
+        return None
+    return next((c for c in bpy.data.collections if c.get("mpm_domain_uid") == uid), None)
+
+
 def _collection(scene, domain_obj, create: bool):
-    name = f"MPM {domain_obj.name}"
-    coll = bpy.data.collections.get(name)
+    coll = output_collection(domain_obj)
     if coll is None and create:
-        coll = bpy.data.collections.new(name)
-    if coll is not None and create and coll.name not in scene.collection.children:
-        scene.collection.children.link(coll)
+        coll = bpy.data.collections.new(f"MPM {domain_obj.name}")
+        coll["mpm_domain_uid"] = operators.domain_uid(domain_obj)
+    if coll is not None and create:
+        if coll.name != f"MPM {domain_obj.name}":
+            coll.name = f"MPM {domain_obj.name}"  # follow a renamed domain
+        if coll.name not in scene.collection.children:
+            scene.collection.children.link(coll)
     return coll
 
 
@@ -145,7 +171,11 @@ def refresh_outputs(scene, domain_obj, cache: Path | None = None) -> None:
             if mod is None:
                 mod = ob.modifiers.new(POINTS_MODIFIER, "NODES")
                 mod.node_group = _points_group(ob.data.materials[0], meta["dx"] * 0.3)
-    load_domain_frame(scene, domain_obj, scene.frame_current, cache)
+    load_domain_frame(scene, domain_obj, scene.frame_current, cache, force=True)
+
+
+def _read_npz(path: Path) -> dict:
+    return _retry(lambda: dict(np.load(path)))
 
 
 def _set_points(me, pos) -> None:
@@ -170,9 +200,12 @@ def _set_mesh(me, verts, tris, vel) -> None:
     me.update()
 
 
-def load_domain_frame(scene, domain_obj, frame: int, cache: Path | None = None) -> None:
+def load_domain_frame(scene, domain_obj, frame: int, cache: Path | None = None, force: bool = False) -> None:
+    """Show ``frame``; objects already showing that exact file (same mtime) are left alone unless forced."""
+    if _SUSPENDED[0]:
+        return
     cache = cache or _cache_of(domain_obj)
-    coll = _collection(scene, domain_obj, create=False)
+    coll = output_collection(domain_obj)
     if cache is None or coll is None:
         return
     meta = _retry(lambda: json.loads((cache / "cache.json").read_text(encoding="utf-8")))
@@ -180,19 +213,27 @@ def load_domain_frame(scene, domain_obj, frame: int, cache: Path | None = None) 
     particle_file = cache / "frames" / f"frame_{frame:04d}.npz"
     if not particle_file.exists():
         return  # not baked yet: keep what's shown
-    particles = _retry(lambda: dict(np.load(particle_file)))
+    particles = None
     for ob in coll.objects:
         index = ob.get("mpm_index")
-        if index is None or f"pos_{index}" not in particles:
+        if index is None:
             continue
         folder = ob.get("mpm_mesh_folder")
-        if folder:
-            mesh_file = cache / "surface" / "meshes" / folder / f"frame_{frame:04d}.npz"
-            if mesh_file.exists():
-                m = _retry(lambda: dict(np.load(mesh_file)))
-                _set_mesh(ob.data, m["verts"], m["tris"], m["vel"])
+        source = cache / "surface" / "meshes" / folder / f"frame_{frame:04d}.npz" if folder else particle_file
+        if not source.exists():
             continue
-        _set_points(ob.data, particles[f"pos_{index}"])
+        stamp = (str(source), source.stat().st_mtime)
+        if not force and _LOADED.get(ob.session_uid) == stamp:
+            continue
+        if folder:
+            m = _read_npz(source)
+            _set_mesh(ob.data, m["verts"], m["tris"], m["vel"])
+        else:
+            particles = particles if particles is not None else _read_npz(particle_file)
+            if f"pos_{index}" not in particles:
+                continue
+            _set_points(ob.data, particles[f"pos_{index}"])
+        _LOADED[ob.session_uid] = stamp
 
 
 @persistent
@@ -207,6 +248,21 @@ def load_frame(scene, depsgraph=None) -> None:
 @persistent
 def on_load_post(_dummy=None) -> None:
     _ensure_frame_handler()
+    _LOADED.clear()
+    for ob in bpy.data.objects:  # a saved "running" status means the bake was cut off by closing Blender
+        if ob.type == "MESH" and ob.mpm.role == "DOMAIN" and ob.mpm.domain.status in RUNNING_STATUSES:
+            ob.mpm.domain.status = "interrupted"
+            ob.mpm.domain.status_message = "Interrupted when Blender closed: Resume to continue"
+    _restore_outputs()
+
+
+@persistent
+def on_undo_post(*_args) -> None:
+    """Undo removes output objects created after the undo step; rebuild them from the cache."""
+    _restore_outputs()
+
+
+def _restore_outputs() -> None:
     for scene in bpy.data.scenes:
         for domain_obj in _domains(scene):
             try:
@@ -231,13 +287,14 @@ def _after_bake(scene, domain_obj, cache) -> None:
 
 
 def _on_progress(scene, domain_obj, cache) -> None:
-    if _collection(scene, domain_obj, create=False) is None:
+    if output_collection(domain_obj) is None:
         refresh_outputs(scene, domain_obj, Path(cache))
     else:
         load_domain_frame(scene, domain_obj, scene.frame_current, Path(cache))
 
 
-_HANDLERS = [(bpy.app.handlers.load_post, on_load_post), (bpy.app.handlers.load_pre, on_load_pre)]
+_HANDLERS = [(bpy.app.handlers.load_post, on_load_post), (bpy.app.handlers.load_pre, on_load_pre),
+             (bpy.app.handlers.undo_post, on_undo_post), (bpy.app.handlers.redo_post, on_undo_post)]
 _HOOKS = [(operators.AFTER_BAKE, _after_bake), (operators.AFTER_SURFACE, _after_bake),
           (operators.AFTER_FREE, remove_outputs),
           (operators.ON_PROGRESS, _on_progress)]

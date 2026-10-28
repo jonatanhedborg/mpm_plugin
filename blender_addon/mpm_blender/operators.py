@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
+import uuid
+from pathlib import Path
 
 import bpy
+
+from mpm_core.scene import scene_hash, write_scene
 
 from mpm_surface.settings import SurfaceSettings, write_settings  # no warp import
 
 from . import jobs
-from .export import ExportError, cache_path, write_export
+from .export import ExportError, cache_path, export_scene, write_export
 from .props import effective_display
 
 # Called as hook(scene, domain_obj, cache_path) after a job finishes successfully. Display and
@@ -23,6 +28,25 @@ ON_PROGRESS: list = []  # hook(scene, domain_obj, cache_path) while a bake runs,
 def find_domain(context, name: str):
     ob = bpy.data.objects.get(name) if name else context.object
     return ob if ob is not None and ob.type == "MESH" and ob.mpm.role == "DOMAIN" else None
+
+
+def domain_uid(domain_obj) -> str:
+    """A persistent id for the domain (survives renames and file reloads); assigned on first use."""
+    d = domain_obj.mpm.domain
+    if not d.uid:
+        d.uid = uuid.uuid4().hex
+    return d.uid
+
+
+def find_domain_by_uid(uid: str):
+    return next((ob for ob in bpy.data.objects if ob.type == "MESH" and ob.mpm.role == "DOMAIN"
+                 and ob.mpm.domain.uid == uid), None)
+
+
+def is_running(domain_obj) -> bool:
+    """A job is actually alive for this domain (the saved status string can be stale)."""
+    job = jobs.JOBS.get(domain_obj.mpm.domain.uid)
+    return job is not None and job.running
 
 
 def set_status(domain_obj, status: str, message: str = "", progress: float | None = None) -> None:
@@ -50,9 +74,9 @@ class _JobOperator:
     hooks: list = []
 
     def start_job(self, context, domain_obj, job):
-        jobs.JOBS[domain_obj.name] = job
+        self._uid = domain_uid(domain_obj)
+        jobs.JOBS[self._uid] = job
         job.start()
-        self._domain_name = domain_obj.name
         set_status(domain_obj, self.running_status, "Starting…", 0.0)
         if self.wait:
             job.wait()
@@ -64,9 +88,13 @@ class _JobOperator:
     def modal(self, context, event):
         if event.type != "TIMER":
             return {"PASS_THROUGH"}
-        domain_obj = bpy.data.objects.get(self._domain_name)
-        job = jobs.JOBS.get(self._domain_name)
-        if domain_obj is None or job is None:
+        domain_obj = find_domain_by_uid(self._uid)  # by id: the domain may be renamed meanwhile
+        job = jobs.JOBS.get(self._uid)
+        if job is None:
+            context.window_manager.event_timer_remove(self._timer)
+            return {"CANCELLED"}
+        if domain_obj is None:  # domain deleted: stop following, let the job finish on its own
+            job.cancel()
             context.window_manager.event_timer_remove(self._timer)
             return {"CANCELLED"}
         progress = job.poll()
@@ -113,8 +141,7 @@ class _JobOperator:
         return {"CANCELLED"}
 
     def busy(self, domain_obj) -> bool:
-        job = jobs.JOBS.get(domain_obj.name)
-        return job is not None and job.running
+        return is_running(domain_obj)
 
 
 class MPM_OT_bake(_JobOperator, bpy.types.Operator):
@@ -133,12 +160,19 @@ class MPM_OT_bake(_JobOperator, bpy.types.Operator):
         if self.busy(domain_obj):
             return self.fail(domain_obj, "a bake or surface run is already running for this domain")
         quality = domain_obj.mpm.domain.quality
+        d = domain_obj.mpm.domain
         try:
             if self.resume:
                 path = cache_path(domain_obj, quality)
                 if not (path / "state").exists():
                     raise ExportError("nothing to resume: bake first")
+                if _scene_changed(context.scene, domain_obj, quality, path):
+                    raise ExportError("the scene changed since this bake started: Bake from scratch "
+                                      "(Resume would mix old and new settings)")
             else:
+                if not d.cache_dir:  # pin the default folder so renaming the domain doesn't lose the cache
+                    path = cache_path(domain_obj, quality)  # raises for an unsaved file
+                    d.cache_dir = bpy.path.relpath(str(path.parent)) if bpy.data.filepath else str(path.parent)
                 path = write_export(context.scene, domain_obj, quality)
         except ExportError as exc:
             return self.fail(domain_obj, str(exc))
@@ -156,6 +190,14 @@ class MPM_OT_bake(_JobOperator, bpy.types.Operator):
 
     def done_message(self, progress) -> str:
         return f"Baked {progress.get('frame')} frames, {progress.get('particles', 0):,} particles"
+
+
+def _scene_changed(scene, domain_obj, quality: str, cache: Path) -> bool:
+    """Would a fresh export differ from the scene the cached bake was made from?"""
+    with tempfile.TemporaryDirectory() as tmp:
+        description, _ = export_scene(scene, domain_obj, quality)
+        write_scene(description, Path(tmp))
+        return scene_hash(Path(tmp)) != scene_hash(cache / "scene")
 
 
 def _surfaced_emitters(cache) -> list[str]:
@@ -218,8 +260,7 @@ class MPM_OT_free_surface(bpy.types.Operator):
         domain_obj = find_domain(context, self.domain)
         if domain_obj is None:
             return {"CANCELLED"}
-        job = jobs.JOBS.get(domain_obj.name)
-        if job is not None and job.running:
+        if is_running(domain_obj):
             self.report({"ERROR"}, "cancel the running job first")
             return {"CANCELLED"}
         try:
@@ -242,9 +283,22 @@ class MPM_OT_cancel(bpy.types.Operator):
 
     def execute(self, context):
         domain_obj = find_domain(context, self.domain)
-        job = jobs.JOBS.get(domain_obj.name) if domain_obj else None
-        if job is None or not job.running:
+        if domain_obj is None:
             return {"CANCELLED"}
+        job = jobs.JOBS.get(domain_obj.mpm.domain.uid)
+        if job is None or not job.running:
+            # no job in this session (e.g. a bake left running by an earlier session): ask through the files
+            try:
+                cache = cache_path(domain_obj, domain_obj.mpm.domain.quality)
+            except ExportError:
+                return {"CANCELLED"}
+            if not cache.exists():
+                return {"CANCELLED"}
+            (cache / "cancel").touch()
+            if (cache / "surface").exists():
+                (cache / "surface" / "cancel").touch()
+            set_status(domain_obj, "cancelled", "Cancel requested")
+            return {"FINISHED"}
         job.cancel()
         set_status(domain_obj, domain_obj.mpm.domain.status, "Cancelling…")
         return {"FINISHED"}
@@ -264,8 +318,7 @@ class MPM_OT_free_bake(bpy.types.Operator):
         domain_obj = find_domain(context, self.domain)
         if domain_obj is None:
             return {"CANCELLED"}
-        job = jobs.JOBS.get(domain_obj.name)
-        if job is not None and job.running:
+        if is_running(domain_obj):
             self.report({"ERROR"}, "cancel the running bake first")
             return {"CANCELLED"}
         try:

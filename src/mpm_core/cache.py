@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -48,6 +50,28 @@ def _atomic_write_bytes(path: Path, write) -> None:
                 tmp.unlink(missing_ok=True)
                 raise
             time.sleep(0.02)
+
+
+def stdin_closed() -> threading.Event:
+    """An event set once stdin hits EOF: the parent that started us with stdin=PIPE has exited.
+
+    Used by the bake and surface CLIs (``--watch-stdin``) so they stop when Blender quits.
+    """
+    event = threading.Event()
+
+    def watch():
+        # raw os.read, not sys.stdin: a daemon thread blocked in a buffered read makes interpreter
+        # shutdown abort ("could not acquire lock for <stdin>")
+        try:
+            fd = sys.stdin.fileno()
+            while os.read(fd, 4096):
+                pass
+        except (OSError, ValueError, AttributeError):
+            pass
+        event.set()
+
+    threading.Thread(target=watch, daemon=True).start()
+    return event
 
 
 @contextmanager

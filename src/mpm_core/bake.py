@@ -19,7 +19,8 @@ from pathlib import Path
 import numpy as np
 
 from mpm_core.backends import create_solver
-from mpm_core.cache import CacheWriter, read_checkpoint, write_checkpoint, write_json
+from mpm_core.cache import (CacheWriter, exclusive_lock, read_checkpoint, stdin_closed, write_checkpoint,
+                            write_json)
 from mpm_core.geometry import mesh_is_closed, sample_mesh_volume, transform_points
 from mpm_core.scene import Emitter, SceneDescription, read_scene, scene_hash
 from mpm_core.solver import ColliderGeometry, Solver
@@ -93,6 +94,19 @@ def _active_emitters(scene: SceneDescription, frame: int) -> list[int]:
 def bake(cache_dir: Path, *, backend: str = "warp", device: str | None = None, resume: bool = False,
          should_cancel: Callable[[], bool] | None = None) -> BakeResult:
     cache_dir = Path(cache_dir)
+    try:
+        lock = exclusive_lock(cache_dir / "bake.lock")
+        lock.__enter__()
+    except RuntimeError as exc:
+        raise RuntimeError(f"a bake is already running on {cache_dir}") from exc
+    try:
+        return _bake_locked(cache_dir, backend, device, resume, should_cancel)
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def _bake_locked(cache_dir: Path, backend: str, device: str | None, resume: bool,
+                 should_cancel: Callable[[], bool] | None) -> BakeResult:
     scene_dir = cache_dir / "scene"
     cancel_file = cache_dir / "cancel"
     cancel_file.unlink(missing_ok=True)  # a leftover request from an earlier bake
@@ -174,7 +188,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--backend", default="warp")
     ap.add_argument("--device", default=None)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--watch-stdin", action="store_true",
+                    help="stop (as if cancelled) when stdin closes, i.e. when the launching process exits")
     args = ap.parse_args(argv)
+    parent_gone = stdin_closed() if args.watch_stdin else None
 
     last = [0.0]
 
@@ -184,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         if doc_path.exists() and doc_path.stat().st_mtime != last[0]:
             last[0] = doc_path.stat().st_mtime
             print(doc_path.read_text(encoding="utf-8").replace("\n", " "), flush=True)
-        return False
+        return parent_gone is not None and parent_gone.is_set()
 
     try:
         result = bake(args.cache_dir, backend=args.backend, device=args.device, resume=args.resume,

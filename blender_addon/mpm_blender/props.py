@@ -33,15 +33,23 @@ def _reset_to_preset(self, context):
         setattr(self, field, getattr(m, field))
 
 
+def _quality_changed(self, context):
+    from . import display  # lazy: display imports this module
+
+    display.refresh_outputs(context.scene, self.id_data)
+
+
 class MPMDomainSettings(bpy.types.PropertyGroup):
+    uid: bpy.props.StringProperty(default="", description="Persistent id, assigned on first bake")
     resolution: bpy.props.IntProperty(name="Resolution", default=128, min=16, max=1024,
                                       description="Grid cells along the domain's longest side (final quality)")
-    quality: bpy.props.EnumProperty(name="Quality", default="PREVIEW", items=[
+    quality: bpy.props.EnumProperty(name="Quality", default="PREVIEW", update=_quality_changed, items=[
         ("PREVIEW", "Preview", "Half resolution, for quick iteration"),
         ("FINAL", "Final", "Full resolution")])
     particles_per_cell: bpy.props.EnumProperty(name="Particles per Cell", default="8", items=[
         ("1", "1", "Fastest, coarse"), ("8", "8", "Standard"), ("27", "27", "Dense, slow")])
     cache_dir: bpy.props.StringProperty(name="Cache Folder", subtype="DIR_PATH", default="",
+                                        options={"PATH_SUPPORTS_BLEND_RELATIVE"},
                                         description="Where bakes are stored; empty = //mpm_cache/<domain name>")
     wall_x_neg: bpy.props.BoolProperty(name="-X", default=True)
     wall_x_pos: bpy.props.BoolProperty(name="+X", default=True)

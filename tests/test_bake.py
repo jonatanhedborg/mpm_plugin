@@ -237,3 +237,32 @@ def test_resume_keeps_meshes(tmp_path):
     (tmp_path / "surface" / "keep").write_bytes(b"x")
     bake(tmp_path, backend="fake", resume=True)
     assert (tmp_path / "surface" / "keep").exists()
+
+
+def test_second_bake_on_same_cache_refused(tmp_path):  # add-on review I1
+    from mpm_core.cache import exclusive_lock
+
+    make_cache_dir(tmp_path, small_scene(frame_end=3))
+    with exclusive_lock(tmp_path / "bake.lock"):
+        with pytest.raises(RuntimeError, match="already running"):
+            bake(tmp_path, backend="fake")
+
+
+@pytest.mark.gpu
+def test_cli_stops_when_parent_goes_away(tmp_path):  # add-on review I1: Blender quit mid-bake
+    import time
+
+    make_cache_dir(tmp_path, small_scene(frame_end=400, resolution=32))
+    proc = subprocess.Popen([sys.executable, "-m", "mpm_core.bake", str(tmp_path), "--watch-stdin"],
+                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        try:
+            if (progress(tmp_path).get("frame") or 0) >= 2:
+                break
+        except (FileNotFoundError, json.JSONDecodeError, PermissionError):
+            pass
+        time.sleep(0.05)
+    proc.stdin.close()  # what the OS does when Blender exits
+    assert proc.wait(timeout=60) == 0
+    assert progress(tmp_path)["status"] == "cancelled"

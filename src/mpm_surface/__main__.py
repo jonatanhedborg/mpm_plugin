@@ -10,6 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from mpm_core.cache import stdin_closed
 from mpm_surface.run import surface
 
 
@@ -23,9 +24,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("cache_dir", type=Path)
     ap.add_argument("--frames", type=_frame_range, default=None, help="e.g. 1-48")
     ap.add_argument("--device", default=None)
+    ap.add_argument("--watch-stdin", action="store_true",
+                    help="stop (as if cancelled) when stdin closes, i.e. when the launching process exits")
     args = ap.parse_args(argv)
+    parent_gone = stdin_closed() if args.watch_stdin else None
     try:
-        result = surface(args.cache_dir, frames=args.frames, device=args.device)
+        result = surface(args.cache_dir, frames=args.frames, device=args.device,
+                         should_cancel=parent_gone.is_set if parent_gone else None)
     except Exception as exc:
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

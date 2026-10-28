@@ -4,6 +4,8 @@ import bpy
 
 from mpm_core.tweaks import tweaks_for
 
+from .operators import is_running
+
 
 class _MPMPanel:
     bl_space_type = "PROPERTIES"
@@ -75,7 +77,7 @@ class MPM_PT_domain_bake(_RolePanel, bpy.types.Panel):
         col.use_property_split = True
         col.prop(d, "cache_dir")
         col.prop(d, "auto_surface")
-        running = d.status in ("starting", "running", "surfacing")
+        running = is_running(context.object)  # not the saved status: it can be stale after a reload
         if running:
             layout.progress(factor=d.progress, type="BAR", text=d.status_message or d.status.title())
             layout.operator("mpm.cancel", icon="CANCEL")

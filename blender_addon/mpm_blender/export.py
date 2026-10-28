@@ -98,13 +98,16 @@ def export_scene(scene, domain_obj, quality: str) -> tuple[SceneDescription, lis
     walls = {f"{axis}{sign}": getattr(d, f"wall_{axis}_{name}")
              for axis in "xyz" for sign, name in (("-", "neg"), ("+", "pos"))}
 
-    current = scene.frame_current
-    scene.frame_set(scene.frame_start)
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    emitter_meshes = [_local_mesh(ob, depsgraph) for ob in emitters]
-    collider_meshes = [_local_mesh(ob, depsgraph) for ob in colliders]
-    scene.frame_set(current)
-    transforms = _sample_transforms(scene, emitters + colliders)
+    from . import display  # lazy: display imports this module
+
+    with display.suspended():  # frame_set would otherwise reload the old cache on every sampled frame
+        current = scene.frame_current
+        scene.frame_set(scene.frame_start)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        emitter_meshes = [_local_mesh(ob, depsgraph) for ob in emitters]
+        collider_meshes = [_local_mesh(ob, depsgraph) for ob in colliders]
+        scene.frame_set(current)
+        transforms = _sample_transforms(scene, emitters + colliders)
 
     scene_emitters = []
     for i, (ob, mesh) in enumerate(zip(emitters, emitter_meshes)):
