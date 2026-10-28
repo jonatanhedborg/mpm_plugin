@@ -19,9 +19,8 @@ import bpy
 import numpy as np
 from bpy.app.handlers import persistent
 
-from mpm_core.materials import load_preset
 
-from . import jobs, operators
+from . import jobs, operators, presets, props
 from .export import ExportError, cache_path
 
 POINTS_MODIFIER = "MPM Points"
@@ -89,18 +88,24 @@ def _collection(scene, domain_obj, create: bool):
     return coll
 
 
-def _material(preset_id: str):
-    preset = load_preset(preset_id)
-    name = f"MPM {preset.label}"
+def _material(emitter):
+    """The shared render material of the emitter's preset, created from the preset's look on first use.
+
+    ``emitter`` is the emitter's settings, or None when the emitter object is gone.
+    """
+    preset = presets.get(emitter.preset_id) if emitter is not None else None
+    label = preset.label if preset is not None else (emitter.preset_label if emitter is not None else "") or "Custom"
+    name = f"MPM {label}"
     mat = bpy.data.materials.get(name)
     if mat is not None:
         return mat  # never overwrite: the user may have edited it
+    look = preset.look if preset is not None else presets.DEFAULT_LOOK
     mat = bpy.data.materials.new(name)
     bsdf = mat.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = (*preset.look.base_color, 1.0)
-    bsdf.inputs["Roughness"].default_value = preset.look.roughness
-    bsdf.inputs["Subsurface Weight"].default_value = preset.look.subsurface
-    mat.diffuse_color = (*preset.look.base_color, 1.0)
+    bsdf.inputs["Base Color"].default_value = (*look.base_color, 1.0)
+    bsdf.inputs["Roughness"].default_value = look.roughness
+    bsdf.inputs["Subsurface Weight"].default_value = look.subsurface
+    mat.diffuse_color = (*look.base_color, 1.0)
     return mat
 
 
@@ -161,9 +166,8 @@ def refresh_outputs(scene, domain_obj, cache: Path | None = None) -> None:
             ob["mpm_emitter"] = name
         ob["mpm_index"] = index
         emitter_obj = bpy.data.objects.get(name)
-        preset = emitter_obj.mpm.emitter.preset if emitter_obj is not None else "jelly"
         if not ob.data.materials:
-            ob.data.materials.append(_material(preset))
+            ob.data.materials.append(_material(emitter_obj.mpm.emitter if emitter_obj is not None else None))
         mod = ob.modifiers.get(POINTS_MODIFIER)
         if name in folders:
             ob["mpm_mesh_folder"] = folders[name]
@@ -253,6 +257,7 @@ def load_frame(scene, depsgraph=None) -> None:
 def on_load_post(_dummy=None) -> None:
     _ensure_frame_handler()
     _LOADED.clear()
+    props.migrate_all()
     for ob in bpy.data.objects:  # a saved "running" status means the bake was cut off by closing Blender
         if ob.type == "MESH" and ob.mpm.role == "DOMAIN" and ob.mpm.domain.status in RUNNING_STATUSES:
             ob.mpm.domain.status = "interrupted"

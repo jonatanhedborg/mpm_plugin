@@ -14,16 +14,40 @@ Workflow, all in the Properties editor's Physics tab, MPM panel:
 
 1. Add a box, set Role to **Domain** (it becomes a wireframe and is hidden from renders). Set resolution,
    quality (Preview = half resolution), walls.
-2. Add meshes, set Role to **Emitter**: Fill or Inflow, pick a material preset, tweak it. Display &
-   Surface picks points or a surface mesh (Auto follows the preset). Inflow **Substeps** emit several
-   times per frame, for smooth streams from moving emitters and fast flows (4 is a good start).
+2. Add meshes, set Role to **Emitter**: Fill or Inflow. Under **Material**, pick a preset and adjust its
+   values (see Materials below). Display & Surface picks points or a surface mesh (Auto follows the
+   preset). Inflow **Substeps** emit several times per frame, for smooth streams from moving emitters and
+   fast flows (4 is a good start).
 3. Optionally add meshes with Role **Collider** (animated objects work).
 4. Save the .blend (the cache goes to `//mpm_cache/<domain>` by default), then **Bake** on the domain.
    Frames appear while it bakes; Cancel / Resume / Free next to it. With "Surface After Bake" on,
    surface meshes are made right after; **Bake Surface** re-makes them after changing surface settings.
 
 Output objects appear in a collection `MPM <domain>`, with materials `MPM <preset>` that you can edit
-freely (re-bakes keep them). Surface meshes carry a `velocity` attribute for motion blur.
+freely (re-bakes keep them).
+
+### Materials
+
+Every emitter has the same material settings: a **Model** and its values. Stiffness, Poisson Ratio and
+Density apply to all models; each model adds its own:
+
+| Model | For | Adds |
+|---|---|---|
+| Elastic | jelly, rubber | nothing: always springs back |
+| Plastic | cream, clay, toothpaste, mud | Yield Stress: higher holds taller shapes |
+| Granular | sand, sugar, soil, gravel | Friction Angle: higher holds steeper piles |
+| Snow | packed, powder, wet snow | Hardening, Max Hardening, Compression and Stretch Limits |
+
+A preset just fills in these values (and the look). The menu next to **Preset** lists the built-in ones by
+model; **+** saves the emitter's current values as a preset of your own, with the look of its baked render
+material (color, roughness, subsurface) and its display mode. Your presets show in the same menu under
+Your Presets, and **−** deletes the selected one. They are stored per computer, one `.toml` file each:
+
+- Linux: `~/.config/blender/5.2/extensions/.user/user_default/mpm_blender/presets/`
+- Windows: `%APPDATA%\Blender Foundation\Blender\5.2\extensions\.user\user_default\mpm_blender\presets\`
+
+To use them on another computer, copy that folder. A file that uses a preset missing on this computer keeps
+its values. Surface meshes carry a `velocity` attribute for motion blur.
 
 Add-on tests run inside headless Blender:
 
@@ -82,6 +106,9 @@ To look at a cache in Blender, open `tools/blender_view_cache.py` in the Text Ed
 `CACHE_DIR`, and run it. `CACHE_DIR` can also be a folder of caches, which are then laid out side
 by side, each with its name, domain box and animated colliders.
 
+`examples/preset_gallery.py` bakes every material preset in the same test (a dropped block and a pour) into
+`out/presets/`, for comparing presets and checking new ones.
+
 `examples/test_scenes.py` bakes the GPU test setups (plus a few known-issue variants) into
 `out/tests/`, so you can see what the tests check: point the viewer at `out/tests`.
 
@@ -118,3 +145,5 @@ scene is slower here because it does general mesh distance queries against the c
 - On slanted mesh colliders, friction is weaker than the setting implies: at 30° with friction 1.0,
   snow and cream still slide (10° holds). Flat colliders and domain walls are fine.
 - Jelly (purely elastic, undamped) keeps vibrating and creeps on slopes regardless of friction.
+- Granular piles settle well below their Friction Angle (47° settles at about 30°, and slopes top out
+  around 40°); the presets are calibrated for this.

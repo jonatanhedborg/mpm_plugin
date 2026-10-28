@@ -1,4 +1,5 @@
 label = "Snow, powder"
+description = "Light, loose snow that puffs apart easily"
 
 [material]
 model = "snow"

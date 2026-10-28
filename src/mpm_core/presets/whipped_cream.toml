@@ -1,4 +1,5 @@
 label = "Whipped cream"
+description = "Soft and airy, holds peaks and smears when pushed"
 
 [material]
 model = "von_mises"

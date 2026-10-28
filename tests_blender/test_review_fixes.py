@@ -142,8 +142,8 @@ def test_undo_restores_outputs(baked):  # I6
 
 def test_resume_refuses_changed_scene(baked):  # I7
     _, domain, emitter = baked
-    emitter.mpm.emitter.stiffness = 2.0
+    emitter.mpm.emitter.youngs_modulus *= 2
     with pytest.raises(RuntimeError, match="changed"):
         bpy.ops.mpm.bake(wait=True, resume=True, domain="Domain")
-    emitter.mpm.emitter.stiffness = 1.0
+    emitter.mpm.emitter.youngs_modulus /= 2
     assert bpy.ops.mpm.bake(wait=True, resume=True, domain="Domain") == {"FINISHED"}

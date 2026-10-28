@@ -1,0 +1,17 @@
+label = "Snow, wet"
+description = "Heavy, sticky snow that slumps into clumps instead of shattering"
+
+[material]
+model = "snow"
+youngs_modulus = 1.4e5
+poisson_ratio = 0.2
+density = 550.0
+hardening = 8.0
+critical_compression = 5.0e-2
+critical_stretch = 7.5e-3
+
+[look]
+display = "mesh"
+base_color = [0.9, 0.93, 0.97]
+roughness = 0.25
+subsurface = 0.5

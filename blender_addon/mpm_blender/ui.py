@@ -2,9 +2,9 @@
 
 import bpy
 
-from mpm_core.tweaks import tweaks_for
-
+from . import presets
 from .operators import is_running
+from .props import MODELS, is_modified, used_fields
 
 
 class _MPMPanel:
@@ -99,7 +99,7 @@ class MPM_PT_domain_bake(_RolePanel, bpy.types.Panel):
 
 # ---------------------------------------------------------------------------- emitter
 
-class MPM_PT_emitter_material(_RolePanel, bpy.types.Panel):
+class MPM_PT_emitter(_RolePanel, bpy.types.Panel):
     bl_label = "Emitter"
     role = "EMITTER"
 
@@ -109,30 +109,55 @@ class MPM_PT_emitter_material(_RolePanel, bpy.types.Panel):
         e = context.object.mpm.emitter
         layout.prop(e, "domain")
         layout.prop(e, "kind")
-        layout.prop(e, "preset")
-        col = layout.column()
-        col.active = not e.use_advanced
-        for spec in tweaks_for(e.preset):
-            col.prop(e, spec.name, text=spec.label)
 
 
-class MPM_PT_emitter_advanced(_RolePanel, bpy.types.Panel):
-    bl_label = "Advanced"
-    bl_parent_id = "MPM_PT_emitter_material"
-    bl_options = {"DEFAULT_CLOSED"}
+def preset_text(e) -> str:
+    """What the preset menu button shows."""
+    preset = presets.get(e.preset_id)
+    if preset is None:
+        return f"{e.preset_label} (not on this computer)" if e.preset_id and e.preset_label else "Custom"
+    return f"{preset.label} (edited)" if is_modified(e) else preset.label
+
+
+class MPM_MT_material_presets(bpy.types.Menu):
+    bl_label = "Material Presets"
+
+    def draw(self, context):
+        row = self.layout.row()
+        everything = presets.all_presets().values()
+        for _, core_model, label, _ in MODELS:
+            col = row.column()
+            col.label(text=label)
+            for preset in sorted((p for p in everything if not p.is_user and p.material.model == core_model),
+                                 key=lambda p: p.label):
+                col.operator("mpm.apply_preset", text=preset.label).preset_id = preset.id
+        mine = [p for p in everything if p.is_user]
+        if mine:
+            col = row.column()
+            col.label(text="Your Presets")
+            for preset in mine:
+                col.operator("mpm.apply_preset", text=preset.label).preset_id = preset.id
+
+
+class MPM_PT_emitter_material(_RolePanel, bpy.types.Panel):
+    bl_label = "Material"
     role = "EMITTER"
-
-    def draw_header(self, context):
-        self.layout.prop(context.object.mpm.emitter, "use_advanced", text="")
 
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
         e = context.object.mpm.emitter
-        layout.active = e.use_advanced
-        for field in ("youngs_modulus", "poisson_ratio", "yield_stress", "critical_compression",
-                      "critical_stretch"):
-            layout.prop(e, field)
+        split = layout.split(factor=0.4)
+        split.alignment = "RIGHT"
+        split.label(text="Preset")
+        row = split.row(align=True)
+        row.menu("MPM_MT_material_presets", text=preset_text(e))
+        row.operator("mpm.save_preset", text="", icon="ADD")
+        row.operator("mpm.delete_preset", text="", icon="REMOVE")
+        layout.prop(e, "model")
+        col = layout.column()
+        for field in used_fields(e.model):
+            col.prop(e, field)
 
 
 class MPM_PT_emitter_inflow(_RolePanel, bpy.types.Panel):
@@ -185,15 +210,16 @@ class MPM_PT_collider_settings(_RolePanel, bpy.types.Panel):
         layout.prop(c, "friction")
 
 
-PANELS = [MPM_PT_main, MPM_PT_domain_settings, MPM_PT_domain_walls, MPM_PT_domain_bake, MPM_PT_emitter_material,
-          MPM_PT_emitter_advanced, MPM_PT_emitter_inflow, MPM_PT_emitter_display, MPM_PT_collider_settings]
+PANELS = [MPM_PT_main, MPM_PT_domain_settings, MPM_PT_domain_walls, MPM_PT_domain_bake, MPM_PT_emitter,
+          MPM_PT_emitter_material, MPM_PT_emitter_inflow, MPM_PT_emitter_display, MPM_PT_collider_settings]
+CLASSES = [MPM_MT_material_presets, *PANELS]
 
 
 def register():
-    for cls in PANELS:
+    for cls in CLASSES:
         bpy.utils.register_class(cls)
 
 
 def unregister():
-    for cls in reversed(PANELS):
+    for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)

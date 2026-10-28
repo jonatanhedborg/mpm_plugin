@@ -77,6 +77,11 @@ Known limitations (see README):
 - Friction on steep slanted colliders is weaker than its setting (30° with friction 1.0 slides; flat
   colliders and domain walls are fine). Needs a better contact model.
 - Jelly is undamped: it keeps wobbling and creeps on slopes. Needs damping in the preset/model.
+- Granular piles settle well below the friction angle (47° gives ~30°, saturating near 40°); presets are
+  calibrated to it. Likely numerical (Drucker-Prager return mapping + APIC); a better model would let the
+  angle mean the angle of repose.
+- Plastic materials have a yield stress but no viscosity, so toothpaste-like stacking needs a higher yield
+  stress than the real material.
 
 Ideas discussed, not started:
 

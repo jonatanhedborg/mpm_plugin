@@ -1,4 +1,5 @@
 label = "Jelly"
+description = "Wobbly and fully elastic: always springs back"
 
 [material]
 model = "elastic"

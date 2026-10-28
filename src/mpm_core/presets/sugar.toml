@@ -1,0 +1,15 @@
+label = "Sugar"
+description = "Light, free-flowing crystals"
+
+[material]
+model = "drucker_prager"
+youngs_modulus = 2.0e5
+poisson_ratio = 0.3
+density = 850.0
+friction_angle_deg = 50.0
+
+[look]
+display = "points"
+base_color = [0.96, 0.96, 0.95]
+roughness = 0.3
+subsurface = 0.2

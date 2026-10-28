@@ -1,4 +1,5 @@
 label = "Snow, packed"
+description = "Firm snow that packs harder when pressed and breaks into clumps"
 
 [material]
 model = "snow"

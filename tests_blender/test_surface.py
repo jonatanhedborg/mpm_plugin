@@ -13,7 +13,7 @@ def two_emitters(clean_scene, tmp_path):
     jelly.name = "Jelly"
     sand = add_cube("Sand", location=(0.12, 0.12, 0.1), size=0.08)
     sand.mpm.role = "EMITTER"
-    sand.mpm.emitter.preset = "sand_dry"
+    sand.mpm.emitter.preset_id = "sand_dry"
     return clean_scene, domain, jelly, sand
 
 

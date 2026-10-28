@@ -1,0 +1,15 @@
+label = "Soil, dry"
+description = "Crumbly dirt that holds steeper slopes than sand"
+
+[material]
+model = "drucker_prager"
+youngs_modulus = 3.0e5
+poisson_ratio = 0.3
+density = 1300.0
+friction_angle_deg = 52.0
+
+[look]
+display = "points"
+base_color = [0.32, 0.23, 0.15]
+roughness = 0.95
+subsurface = 0.0

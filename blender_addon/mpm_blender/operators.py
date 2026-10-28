@@ -10,13 +10,14 @@ from pathlib import Path
 
 import bpy
 
+from mpm_core.materials import Look, user_preset_id
 from mpm_core.scene import scene_hash, write_scene
 
 from mpm_surface.settings import SurfaceSettings, write_settings  # no warp import
 
-from . import jobs
+from . import jobs, presets
 from .export import ExportError, cache_path, export_scene, write_export
-from .props import effective_display
+from .props import apply_preset, effective_display, emitter_material
 
 # Called as hook(scene, domain_obj, cache_path) after a job finishes successfully. Display and
 # surfacing register here, so this module doesn't import them.
@@ -335,7 +336,126 @@ class MPM_OT_free_bake(bpy.types.Operator):
 
 AFTER_FREE: list = []  # hook(scene, domain_obj) after a cache was deleted
 
-CLASSES = [MPM_OT_bake, MPM_OT_bake_surface, MPM_OT_cancel, MPM_OT_free_bake, MPM_OT_free_surface]
+
+# ---------------------------------------------------------------------------- material presets
+
+def _active_emitter(context):
+    ob = context.object
+    return ob if ob is not None and ob.type == "MESH" and ob.mpm.role == "EMITTER" else None
+
+
+def _current_look(ob) -> Look:
+    """The look to save with a preset: the output object's render material if baked, else the preset's."""
+    e = ob.mpm.emitter
+    preset = presets.get(e.preset_id)
+    look = preset.look if preset is not None else presets.DEFAULT_LOOK
+    display = "mesh" if effective_display(ob) == "MESH" else "points"
+    out = next((o for o in bpy.data.objects if o.get("mpm_emitter") == ob.name), None)
+    mat = out.data.materials[0] if out is not None and out.data.materials else None
+    bsdf = mat.node_tree.nodes.get("Principled BSDF") if mat is not None and mat.node_tree else None
+    if bsdf is None:
+        return Look(display, look.base_color, look.roughness, look.subsurface)
+    return Look(display, tuple(bsdf.inputs["Base Color"].default_value[:3]), bsdf.inputs["Roughness"].default_value,
+                bsdf.inputs["Subsurface Weight"].default_value)
+
+
+class MPM_OT_apply_preset(bpy.types.Operator):
+    bl_idname = "mpm.apply_preset"
+    bl_label = "Apply Material Preset"
+    bl_options = {"REGISTER", "UNDO"}
+
+    preset_id: bpy.props.StringProperty(options={"SKIP_SAVE"})
+
+    @classmethod
+    def poll(cls, context):
+        return _active_emitter(context) is not None
+
+    @classmethod
+    def description(cls, context, properties):
+        preset = presets.get(properties.preset_id)
+        return (preset.description or preset.label) if preset is not None else ""
+
+    def execute(self, context):
+        preset = presets.get(self.preset_id)
+        if preset is None:
+            self.report({"ERROR"}, f"Unknown preset {self.preset_id!r}")
+            return {"CANCELLED"}
+        e = _active_emitter(context).mpm.emitter
+        e.preset_id = preset.id
+        apply_preset(e, preset)  # also when the id didn't change: re-applying resets edited values
+        return {"FINISHED"}
+
+
+class MPM_OT_save_preset(bpy.types.Operator):
+    bl_idname = "mpm.save_preset"
+    bl_label = "Save Material Preset"
+    bl_description = "Save this emitter's material and look as a preset of your own, in every file on this computer"
+    bl_options = {"REGISTER", "UNDO"}
+
+    name: bpy.props.StringProperty(name="Name", default="", options={"SKIP_SAVE"})
+
+    @classmethod
+    def poll(cls, context):
+        return _active_emitter(context) is not None
+
+    def invoke(self, context, event):
+        preset = presets.get(_active_emitter(context).mpm.emitter.preset_id)
+        if not self.name and preset is not None and preset.is_user:
+            self.name = preset.label  # updating your own preset is the common case
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        ob = _active_emitter(context)
+        if not self.name.strip():
+            self.report({"ERROR"}, "Give the preset a name")
+            return {"CANCELLED"}
+        try:
+            existed = presets.get(user_preset_id(self.name)) is not None
+            preset = presets.save(self.name, emitter_material(ob), _current_look(ob))
+        except (ValueError, OSError) as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        ob.mpm.emitter.preset_id = preset.id
+        self.report({"INFO"}, f"{'Updated' if existed else 'Saved'} preset {preset.label!r}")
+        return {"FINISHED"}
+
+
+class MPM_OT_delete_preset(bpy.types.Operator):
+    bl_idname = "mpm.delete_preset"
+    bl_label = "Delete Material Preset"
+    bl_description = "Delete this preset of your own. Emitters using it keep their values"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        ob = _active_emitter(context)
+        preset = presets.get(ob.mpm.emitter.preset_id) if ob is not None else None
+        if preset is None or not preset.is_user:
+            cls.poll_message_set("Only your own presets can be deleted")
+            return False
+        return True
+
+    def invoke(self, context, event):
+        label = presets.get(_active_emitter(context).mpm.emitter.preset_id).label
+        return context.window_manager.invoke_confirm(self, event, title="Delete Preset",
+                                                     message=f"Delete the preset {label!r}?", confirm_text="Delete")
+
+    def execute(self, context):
+        e = _active_emitter(context).mpm.emitter
+        label = presets.get(e.preset_id).label
+        try:
+            presets.delete(e.preset_id)
+        except (KeyError, OSError) as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        e.preset_id = ""
+        e.preset_label = ""
+        self.report({"INFO"}, f"Deleted preset {label!r}")
+        return {"FINISHED"}
+
+
+CLASSES = [MPM_OT_bake, MPM_OT_bake_surface, MPM_OT_cancel, MPM_OT_free_bake, MPM_OT_free_surface,
+           MPM_OT_apply_preset, MPM_OT_save_preset, MPM_OT_delete_preset]
 
 
 def register():

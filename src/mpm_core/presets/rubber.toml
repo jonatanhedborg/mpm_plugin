@@ -1,0 +1,14 @@
+label = "Rubber"
+description = "Bouncy and much firmer than jelly"
+
+[material]
+model = "elastic"
+youngs_modulus = 3.0e5
+poisson_ratio = 0.4
+density = 1100.0
+
+[look]
+display = "mesh"
+base_color = [0.85, 0.3, 0.1]
+roughness = 0.6
+subsurface = 0.0

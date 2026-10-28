@@ -5,9 +5,11 @@ import pytest
 
 
 @pytest.fixture(scope="session", autouse=True)
-def addon():
+def addon(tmp_path_factory):
     import mpm_blender
+    from mpm_blender import presets
 
+    presets.USER_DIR_OVERRIDE = tmp_path_factory.mktemp("user_presets")  # never the real user folder
     mpm_blender.register()
     yield mpm_blender
     mpm_blender.unregister()
@@ -62,7 +64,7 @@ def small_scene(scene, tmp_path, frames=4, resolution=16):
     domain.mpm.domain.auto_surface = False
     emitter = add_cube("Emitter", location=(0, 0, 0.15), size=0.1)
     emitter.mpm.role = "EMITTER"
-    emitter.mpm.emitter.preset = "jelly"
+    emitter.mpm.emitter.preset_id = "jelly"
     return domain, emitter
 
 

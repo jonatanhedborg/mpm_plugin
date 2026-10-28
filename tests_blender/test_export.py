@@ -18,8 +18,8 @@ def basic(clean_scene, tmp_path):
     domain.mpm.domain.cache_dir = str(tmp_path / "cache")
     emitter = add_sphere("Emitter", location=(0, 0, 0.5), radius=0.1)
     emitter.mpm.role = "EMITTER"
-    emitter.mpm.emitter.preset = "whipped_cream"
-    emitter.mpm.emitter.firmness = 2.0
+    emitter.mpm.emitter.preset_id = "whipped_cream"
+    emitter.mpm.emitter.yield_stress = 5000.0
     plane = add_plane("Collider", location=(0, 0, 0.2), size=0.6)
     plane.mpm.role = "COLLIDER"
     for frame, x in ((1, 0.0), (5, 0.4)):
@@ -58,7 +58,7 @@ def test_emitter_transforms_and_local_mesh(basic):
     assert scene.frame_current == 1  # restored
 
 
-def test_material_from_tweaks(basic):
+def test_material_from_settings(basic):
     scene, domain, *_ = basic
     s, _ = export(scene, domain)
     assert s.materials[0].yield_stress == pytest.approx(5000) and s.materials[0].name == "Emitter"
