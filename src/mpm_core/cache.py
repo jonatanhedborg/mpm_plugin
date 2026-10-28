@@ -45,6 +45,10 @@ def _atomic_write_bytes(path: Path, write) -> None:
             time.sleep(0.02)
 
 
+def atomic_write_npz(path: Path, arrays: dict[str, np.ndarray]) -> None:
+    _atomic_write_bytes(Path(path), lambda f: np.savez(f, **arrays))
+
+
 def write_json(path: Path, doc: dict) -> None:
     _atomic_write_bytes(Path(path), lambda f: f.write(json.dumps(doc, indent=2).encode("utf-8")))
 
@@ -69,7 +73,7 @@ class CacheWriter:
             mask = particles.emitter_ids == i
             arrays[f"pos_{i}"] = np.ascontiguousarray(particles.positions[mask], np.float32)
             arrays[f"vel_{i}"] = np.ascontiguousarray(particles.velocities[mask], np.float32)
-        _atomic_write_bytes(frame_path(self.cache_dir, frame), lambda f: np.savez(f, **arrays))
+        atomic_write_npz(frame_path(self.cache_dir, frame), arrays)
 
 
 class CacheReader:
@@ -100,7 +104,7 @@ def write_checkpoint(cache_dir: Path, frame: int, state: dict[str, np.ndarray], 
     path = _checkpoint_path(cache_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     arrays = {**state, "__frame": np.array(frame), "__scene_hash": np.array(scene_hash)}
-    _atomic_write_bytes(path, lambda f: np.savez(f, **arrays))
+    atomic_write_npz(path, arrays)
 
 
 def read_checkpoint(cache_dir: Path) -> tuple[int, dict[str, np.ndarray], str] | None:
