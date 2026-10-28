@@ -71,6 +71,21 @@ def test_reload_file(baked, tmp_path):  # Review Focus
         bpy.ops.wm.read_homefile(use_empty=True)  # back to an unsaved session for the other tests
 
 
+def test_bake_locks_interface(baked):  # rendering crashes when the viewport draws meshes load_frame rewrites
+    assert baked[0].render.use_lock_interface
+
+
+def test_reload_locks_interface(baked, tmp_path):  # files saved before the lock was set
+    baked[0].render.use_lock_interface = False
+    path = str(tmp_path / "scene.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    bpy.ops.wm.open_mainfile(filepath=path)
+    try:
+        assert bpy.context.scene.render.use_lock_interface
+    finally:
+        bpy.ops.wm.read_homefile(use_empty=True)
+
+
 def test_free_bake_removes_outputs(baked):
     bpy.ops.mpm.free_bake(domain="Domain")
     assert output() is None

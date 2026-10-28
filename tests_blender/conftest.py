@@ -25,6 +25,7 @@ def clean_scene():
             block.remove(item)
     scene = bpy.context.scene
     scene.frame_start, scene.frame_end = 1, 10
+    scene.render.use_lock_interface = False
     scene.frame_set(1)
     return scene
 

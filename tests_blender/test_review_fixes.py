@@ -19,9 +19,14 @@ def baked(clean_scene, tmp_path):
 class RecordingLayout:
     def __init__(self):
         self.operators = []
+        self.labels = []
 
     def operator(self, idname, **kwargs):
         self.operators.append(idname)
+        return self
+
+    def label(self, text="", **kwargs):
+        self.labels.append(text)
         return self
 
     def __getattr__(self, name):
@@ -44,8 +49,18 @@ def test_panel_offers_bake_when_no_job_runs(baked):  # C1
     _, domain, _ = baked
     domain.mpm.domain.status = "running"
     layout = RecordingLayout()
-    ui.MPM_PT_domain_bake.draw(SimpleNamespace(layout=layout), SimpleNamespace(object=domain))
+    ui.MPM_PT_domain_bake.draw(SimpleNamespace(layout=layout), SimpleNamespace(object=domain, scene=bpy.context.scene))
     assert "mpm.bake" in layout.operators
+
+
+def test_panel_warns_without_lock_interface(baked):
+    from mpm_blender import ui
+
+    scene, domain, _ = baked
+    scene.render.use_lock_interface = False
+    layout = RecordingLayout()
+    ui.MPM_PT_domain_bake.draw(SimpleNamespace(layout=layout), SimpleNamespace(object=domain, scene=scene))
+    assert any("Lock Interface" in text for text in layout.labels)
 
 
 def test_cancel_without_job_writes_cancel_file(baked):  # I1: orphan from an earlier session

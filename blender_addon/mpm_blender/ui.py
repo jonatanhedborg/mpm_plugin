@@ -91,6 +91,10 @@ class MPM_PT_domain_bake(_RolePanel, bpy.types.Panel):
         row.operator("mpm.free_surface", text="", icon="TRASH")
         if d.status_message:
             layout.label(text=d.status_message, icon="ERROR" if d.status == "error" else "INFO")
+        if not context.scene.render.use_lock_interface:
+            box = layout.box()
+            box.label(text="Rendering can crash without Lock Interface", icon="ERROR")
+            box.prop(context.scene.render, "use_lock_interface")
 
 
 # ---------------------------------------------------------------------------- emitter

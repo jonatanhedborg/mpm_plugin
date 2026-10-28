@@ -82,6 +82,10 @@ def _collection(scene, domain_obj, create: bool):
             coll.name = f"MPM {domain_obj.name}"  # follow a renamed domain
         if coll.name not in scene.collection.children:
             scene.collection.children.link(coll)
+        # load_frame rewrites output meshes from the render thread while rendering; without the lock the
+        # viewport draws them at the same time and Blender crashes (see "Note on Altering Data" in the
+        # bpy.app.handlers docs)
+        scene.render.use_lock_interface = True
     return coll
 
 
