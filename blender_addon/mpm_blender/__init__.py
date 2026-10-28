@@ -1,8 +1,8 @@
 """MPM Solver for Blender: GPU Material Point Method simulation of cream, snow, sand and jelly."""
 
-from . import props
+from . import props, ui
 
-MODULES = [props]
+MODULES = [props, ui]
 
 
 def register():
