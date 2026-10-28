@@ -8,6 +8,7 @@ from collections.abc import Sequence
 import numpy as np
 import warp as wp
 
+from mpm_core.backends.warp import colliders as CK
 from mpm_core.backends.warp import kernels as K
 from mpm_core.materials import MaterialParams
 from mpm_core.scene import Domain
@@ -15,6 +16,7 @@ from mpm_core.solver import AdvanceStats, ColliderGeometry, ParticleData, Solver
 
 PAD = 3  # padding cells around the domain so stencils never leave the grid
 CFL = 0.4
+COLLIDER_THICKNESS = 2.0  # open-mesh colliders are solid this many cells behind their surface
 _STATE_KEYS = ("x", "v", "C", "F", "Jp", "mat", "emitter")
 
 
@@ -63,6 +65,8 @@ class WarpSolver(Solver):
         self.grid_v = wp.zeros(self.dims, dtype=wp.vec3, device=d)
         self.grid_m = wp.zeros(self.dims, dtype=float, device=d)
         self._vmax = wp.zeros(1, dtype=float, device=d)
+        self._meshes: list[wp.Mesh] = []
+        self._frame_dt = 1.0
         self._upload({k: v for k, v in _empty_state().items()})
 
     # -- particle storage ---------------------------------------------------
@@ -120,11 +124,29 @@ class WarpSolver(Solver):
     # -- colliders ------------------------------------------------------------
 
     def set_colliders(self, colliders: Sequence[ColliderGeometry]) -> None:
-        if colliders:
-            raise NotImplementedError("mesh colliders are not implemented yet")
+        d = self.device
+        self._meshes = [wp.Mesh(points=wp.array(c.mesh.verts, dtype=wp.vec3, device=d),
+                                indices=wp.array(c.mesh.tris.ravel(), dtype=int, device=d)) for c in colliders]
+        self._c_ids = wp.array([m.id for m in self._meshes], dtype=wp.uint64, device=d)
+        self._c_closed = wp.array([int(c.closed) for c in colliders], dtype=int, device=d)
+        self._c_friction = wp.array([c.friction for c in colliders], dtype=float, device=d)
+        self._c_lo = wp.array([c.mesh.verts.min(0) for c in colliders], dtype=wp.vec3, device=d)
+        self._c_hi = wp.array([c.mesh.verts.max(0) for c in colliders], dtype=wp.vec3, device=d)
+        identity = np.tile(np.eye(4, dtype=np.float32), (len(colliders), 1, 1))
+        self.set_collider_transforms(identity, identity)
 
     def set_collider_transforms(self, start: np.ndarray, end: np.ndarray) -> None:
-        pass
+        start = np.asarray(start, np.float32).reshape(-1, 4, 4)
+        end = np.asarray(end, np.float32).reshape(-1, 4, 4)
+        if len(start) != len(self._meshes) or len(end) != len(self._meshes):
+            raise ValueError(f"expected {len(self._meshes)} collider transforms")
+        d = self.device
+        self._c_xf0 = wp.array(start, dtype=wp.mat44, device=d)
+        self._c_xf1 = wp.array(end, dtype=wp.mat44, device=d)
+        # AABB early-out margin in local units: a few cells, scaled by the largest inverse scale
+        inv_scale = [max(1.0 / np.linalg.svd(m[:3, :3], compute_uv=False).min() for m in (a, b))
+                     for a, b in zip(start, end)]
+        self._c_margin = wp.array([3.0 * self.dx * k for k in inv_scale], dtype=float, device=d)
 
     # -- stepping ---------------------------------------------------------------
 
@@ -137,7 +159,7 @@ class WarpSolver(Solver):
         steps = math.ceil(frame_dt / dt - 1e-9)
         return frame_dt / steps, steps
 
-    def _substep(self, dt: float) -> None:
+    def _substep(self, dt: float, s: float) -> None:
         d = self.device
         self.grid_v.zero_()
         self.grid_m.zero_()
@@ -148,18 +170,28 @@ class WarpSolver(Solver):
         wp.launch(K.grid_update, self.dims, inputs=[self.grid_v, self.grid_m, self._origin_wp, self.dx, dt,
                                                     self._gravity_wp, self._wall_lo, self._wall_hi, self._lo_on,
                                                     self._hi_on, self.domain.wall_friction], device=d)
+        if self._meshes:
+            wp.launch(CK.grid_colliders, self.dims, inputs=[
+                self.grid_v, self.grid_m, self._origin_wp, self.dx, self._c_ids, self._c_xf0, self._c_xf1,
+                self._c_closed, self._c_friction, self._c_lo, self._c_hi, self._c_margin, COLLIDER_THICKNESS * self.dx,
+                self.dx, s, 1.0 / self._frame_dt], device=d)
         wp.launch(K.g2p, self._n, inputs=[self.x, self.v, self.C, self.F, self.Jp, self.mat, self.m_model,
                                           self.m_mu, self.m_lam, self.m_yield, self.m_alpha, self.m_crit_c,
                                           self.m_crit_s, self.grid_v, self._origin_wp,
                                           self.inv_dx, self.dx, dt, self._wall_lo, self._wall_hi, self._lo_on,
                                           self._hi_on, self._clamp_lo, self._clamp_hi], device=d)
+        if self._meshes:
+            wp.launch(CK.project_particles, self._n, inputs=[
+                self.x, self.v, self._c_ids, self._c_xf0, self._c_xf1, self._c_closed, self._c_lo, self._c_hi,
+                self._c_margin, COLLIDER_THICKNESS * self.dx, s, 1.0 / self._frame_dt], device=d)
 
     def advance(self, frame_dt: float) -> AdvanceStats:
         if self._n == 0:
             return AdvanceStats(0, frame_dt, 0)
+        self._frame_dt = frame_dt
         dt, steps = self._choose_dt(frame_dt)
-        for _ in range(steps):
-            self._substep(dt)
+        for k in range(steps):
+            self._substep(dt, (k + 1) / steps)
         return AdvanceStats(steps, dt, self._remove_escaped())
 
     def _remove_escaped(self) -> int:
