@@ -1,0 +1,17 @@
+schema_version = "1.0.0"
+
+id = "mpm_blender"
+version = "0.1.0"
+name = "MPM Solver"
+tagline = "GPU Material Point Method simulation: cream, snow, sand, jelly"
+maintainer = "Jonatan Hedborg"
+type = "add-on"
+license = ["SPDX:GPL-3.0-or-later"]
+blender_version_min = "5.2.0"
+platforms = ["windows-x64", "linux-x64"]
+
+# filled in by tools/build_extension.py
+wheels = []
+
+[permissions]
+files = "Read and write simulation caches"
