@@ -180,6 +180,47 @@ def test_panels_poll_by_role(clean_scene):
     assert ui.MPM_PT_emitter_inflow.poll(ctx)
 
 
+def test_mpm_button_turns_mpm_on_and_off(clean_scene):
+    from mpm_blender import ui
+
+    ob = add_cube("Thing")
+    bpy.context.view_layer.objects.active = ob
+    ctx = SimpleNamespace(object=ob)
+    assert not ui.MPM_PT_main.poll(ctx)  # off until the button is pressed
+    assert bpy.ops.mpm.toggle() == {"FINISHED"}
+    assert ob.mpm.enabled and ob.mpm.role == "NONE" and ui.MPM_PT_main.poll(ctx)
+    ob.mpm.role = "DOMAIN"
+    assert bpy.ops.mpm.toggle() == {"FINISHED"}
+    assert not ob.mpm.enabled and ob.mpm.role == "NONE" and not ui.MPM_PT_main.poll(ctx)
+    assert not ob.hide_render and ob.display_type == "TEXTURED"  # no longer a domain
+
+
+def test_setting_a_role_turns_mpm_on(clean_scene):
+    ob = add_cube("Thing")
+    ob.mpm.role = "COLLIDER"
+    assert ob.mpm.enabled
+
+
+def test_files_from_before_the_button_keep_mpm_on(clean_scene):
+    from mpm_blender import props
+
+    ob = add_cube("Thing")
+    ob.mpm.role = "EMITTER"
+    ob.mpm.property_unset("enabled")  # as saved by a version without the button
+    assert not ob.mpm.enabled
+    props.migrate_all()
+    assert ob.mpm.enabled
+
+
+def test_physics_button_draws(clean_scene):
+    from mpm_blender import ui
+
+    ob = add_cube("Thing")
+    panel = SimpleNamespace(layout=FakeLayout())
+    ui.draw_physics_button(panel, SimpleNamespace(object=ob))
+    assert ui.draw_physics_button in bpy.types.PHYSICS_PT_add._dyn_ui_initialize()
+
+
 class FakeLayout:
     """Stands in for UILayout; prop() checks the property really exists on the data."""
 

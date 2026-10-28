@@ -86,6 +86,13 @@ def test_reload_locks_interface(baked, tmp_path):  # files saved before the lock
         bpy.ops.wm.read_homefile(use_empty=True)
 
 
+def test_turning_mpm_off_for_domain_removes_outputs(baked):
+    _, domain, _ = baked
+    bpy.context.view_layer.objects.active = domain
+    assert bpy.ops.mpm.toggle() == {"FINISHED"}
+    assert bpy.data.collections.get("MPM Domain") is None and output() is None
+
+
 def test_free_bake_removes_outputs(baked):
     bpy.ops.mpm.free_bake(domain="Domain")
     assert output() is None

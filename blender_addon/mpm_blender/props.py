@@ -69,8 +69,13 @@ def _preset_changed(self, context):
 
 
 def _role_changed(self, context):
-    """A domain is only a box: shown as wireframe, never rendered. Leaving the role restores both."""
+    """A domain is only a box: shown as wireframe, never rendered. Leaving the role restores both.
+
+    Giving an object a role also turns MPM on for it, so scripts can just set the role.
+    """
     ob = self.id_data
+    if self.role != "NONE":
+        self.enabled = True
     is_domain = self.role == "DOMAIN"
     ob.hide_render = is_domain
     ob.display_type = "WIRE" if is_domain else "TEXTURED"
@@ -173,6 +178,7 @@ class MPMColliderSettings(bpy.types.PropertyGroup):
 
 
 class MPMObjectSettings(bpy.types.PropertyGroup):
+    enabled: bpy.props.BoolProperty(default=False, description="MPM is on for this object (the MPM physics button)")
     role: bpy.props.EnumProperty(name="Role", items=ROLES, default="NONE", update=_role_changed)
     domain: bpy.props.PointerProperty(type=MPMDomainSettings)
     emitter: bpy.props.PointerProperty(type=MPMEmitterSettings)
@@ -253,8 +259,12 @@ def migrate_emitter(e) -> bool:
 
 def migrate_all() -> None:
     for ob in bpy.data.objects:
-        if ob.type == "MESH" and migrate_emitter(ob.mpm.emitter):
+        if ob.type != "MESH":
+            continue
+        if migrate_emitter(ob.mpm.emitter):
             print(f"MPM: converted {ob.name!r} to the new material settings")
+        if ob.mpm.role != "NONE" and not ob.mpm.enabled:  # saved before the MPM button existed
+            ob.mpm.enabled = True
 
 
 CLASSES = [MPMDomainSettings, MPMEmitterSettings, MPMColliderSettings, MPMObjectSettings]

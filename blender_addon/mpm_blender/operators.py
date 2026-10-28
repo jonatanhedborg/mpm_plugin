@@ -335,6 +335,34 @@ class MPM_OT_free_bake(bpy.types.Operator):
 
 
 AFTER_FREE: list = []  # hook(scene, domain_obj) after a cache was deleted
+ON_DISABLE: list = []  # hook(scene, obj, old_role) after MPM was turned off for an object
+
+
+class MPM_OT_toggle(bpy.types.Operator):
+    bl_idname = "mpm.toggle"
+    bl_label = "MPM"
+    bl_description = "Add or remove MPM simulation (cream, snow, sand and more) for this object"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.object is not None and context.object.type == "MESH"
+
+    def execute(self, context):
+        ob = context.object
+        settings = ob.mpm
+        if not settings.enabled:
+            settings.enabled = True
+            return {"FINISHED"}
+        if settings.role == "DOMAIN" and is_running(ob):
+            self.report({"ERROR"}, "Cancel the running bake first")
+            return {"CANCELLED"}
+        old_role = settings.role
+        settings.role = "NONE"  # gives a domain back its display and render visibility
+        settings.enabled = False
+        for hook in ON_DISABLE:
+            hook(context.scene, ob, old_role)
+        return {"FINISHED"}
 
 
 # ---------------------------------------------------------------------------- material presets
@@ -454,7 +482,7 @@ class MPM_OT_delete_preset(bpy.types.Operator):
         return {"FINISHED"}
 
 
-CLASSES = [MPM_OT_bake, MPM_OT_bake_surface, MPM_OT_cancel, MPM_OT_free_bake, MPM_OT_free_surface,
+CLASSES = [MPM_OT_bake, MPM_OT_bake_surface, MPM_OT_cancel, MPM_OT_free_bake, MPM_OT_free_surface, MPM_OT_toggle,
            MPM_OT_apply_preset, MPM_OT_save_preset, MPM_OT_delete_preset]
 
 

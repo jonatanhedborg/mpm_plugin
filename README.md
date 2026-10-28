@@ -10,7 +10,9 @@ Install: build the extension (see Building below), then in Blender 5.2 go to Edi
 Get Extensions → (dropdown) Install from Disk, and pick `dist/mpm_blender-0.1.0-windows_x64.zip`
 (or `-linux_x64.zip`). Needs an NVIDIA GPU.
 
-Workflow, all in the Properties editor's Physics tab, MPM panel:
+Workflow, all in the Properties editor's Physics tab: like Fluid or Cloth, click **MPM** to turn it on for an
+object, then pick its Role in the MPM panel (**X MPM** turns it off again; for a domain that also removes its
+output objects, but not its cache).
 
 1. Add a box, set Role to **Domain** (it becomes a wireframe and is hidden from renders). Set resolution,
    quality (Preview = half resolution), walls.

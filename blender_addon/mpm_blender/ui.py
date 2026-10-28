@@ -13,12 +13,23 @@ class _MPMPanel:
     bl_context = "physics"
 
 
+def draw_physics_button(self, context):
+    """The MPM button next to Blender's own physics buttons (appended to PHYSICS_PT_add)."""
+    ob = context.object
+    if ob is None or ob.type != "MESH":
+        return
+    # half width, so it lines up with the left column of the built-in buttons above
+    split = self.layout.split(factor=0.5, align=True)
+    split.operator("mpm.toggle", text="MPM", icon="X" if ob.mpm.enabled else "POINTCLOUD_DATA")
+
+
 class MPM_PT_main(_MPMPanel, bpy.types.Panel):
     bl_label = "MPM"
 
     @classmethod
     def poll(cls, context):
-        return context.object is not None and context.object.type == "MESH"
+        ob = context.object
+        return ob is not None and ob.type == "MESH" and ob.mpm.enabled
 
     def draw(self, context):
         layout = self.layout
@@ -218,8 +229,10 @@ CLASSES = [MPM_MT_material_presets, *PANELS]
 def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
+    bpy.types.PHYSICS_PT_add.append(draw_physics_button)
 
 
 def unregister():
+    bpy.types.PHYSICS_PT_add.remove(draw_physics_button)
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)

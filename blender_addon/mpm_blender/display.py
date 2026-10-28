@@ -291,6 +291,11 @@ def _ensure_frame_handler() -> None:
         bpy.app.handlers.frame_change_post.append(load_frame)
 
 
+def _on_disable(scene, ob, old_role) -> None:
+    if old_role == "DOMAIN":
+        remove_outputs(scene, ob)  # the cache on disk stays
+
+
 def _after_bake(scene, domain_obj, cache) -> None:
     refresh_outputs(scene, domain_obj, Path(cache))
 
@@ -305,7 +310,7 @@ def _on_progress(scene, domain_obj, cache) -> None:
 _HANDLERS = [(bpy.app.handlers.load_post, on_load_post), (bpy.app.handlers.load_pre, on_load_pre),
              (bpy.app.handlers.undo_post, on_undo_post), (bpy.app.handlers.redo_post, on_undo_post)]
 _HOOKS = [(operators.AFTER_BAKE, _after_bake), (operators.AFTER_SURFACE, _after_bake),
-          (operators.AFTER_FREE, remove_outputs),
+          (operators.AFTER_FREE, remove_outputs), (operators.ON_DISABLE, _on_disable),
           (operators.ON_PROGRESS, _on_progress)]
 
 
