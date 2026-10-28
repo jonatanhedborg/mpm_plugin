@@ -103,10 +103,10 @@ surfaced emitters as meshes, the rest as points.
 
 | Scene | Particles | RTX 5080 (Windows) | RTX 4090 (Linux) |
 |---|---|---|---|
-| mix | 204k | 389 ms/frame | not run yet |
-| ball | 454k | 1088 ms/frame | not run yet |
+| mix | 204k | 389 ms/frame | 280 ms/frame |
+| ball | 454k | 1088 ms/frame | 673 ms/frame |
 
-Surfacing the mix scene (default settings): 30 ms/frame on the RTX 5080.
+Surfacing the mix scene (default settings): 30 ms/frame on the RTX 5080, 24 ms/frame on the RTX 4090.
 
 The spike (fixed timestep, analytic ball) ran mix at ~430 ms/frame and ball at ~720 ms/frame. The ball
 scene is slower here because it does general mesh distance queries against the collider.

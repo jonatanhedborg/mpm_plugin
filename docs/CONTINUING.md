@@ -68,8 +68,6 @@ Needs a decision or a person:
   up a mixed scene by hand (cream, sand, snow, a collider), bake a preview while scrubbing, cancel and
   resume, bake final, bake surface, render a frame in Cycles. Panel layout and feel are only checked
   here.
-- **Linux run on the 4090**: `pytest`, `tools/blender_tests.py`, `examples/bench.py out/mix`; add the
-  numbers to the README benchmark table.
 - **Windows path length** (undecided): Warp's wheel has deeply nested files. Normal profile paths fit
   (about 200 of 260 characters), very long Windows profile paths would fail to install the extension.
   Options: accept, strip Warp's nested license folder in the build, or document long-path support.
