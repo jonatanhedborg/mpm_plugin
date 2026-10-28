@@ -33,6 +33,14 @@ def _reset_to_preset(self, context):
         setattr(self, field, getattr(m, field))
 
 
+def _role_changed(self, context):
+    """A domain is only a box: shown as wireframe, never rendered. Leaving the role restores both."""
+    ob = self.id_data
+    is_domain = self.role == "DOMAIN"
+    ob.hide_render = is_domain
+    ob.display_type = "WIRE" if is_domain else "TEXTURED"
+
+
 def _quality_changed(self, context):
     from . import display  # lazy: display imports this module
 
@@ -107,7 +115,7 @@ class MPMColliderSettings(bpy.types.PropertyGroup):
 
 
 class MPMObjectSettings(bpy.types.PropertyGroup):
-    role: bpy.props.EnumProperty(name="Role", items=ROLES, default="NONE")
+    role: bpy.props.EnumProperty(name="Role", items=ROLES, default="NONE", update=_role_changed)
     domain: bpy.props.PointerProperty(type=MPMDomainSettings)
     emitter: bpy.props.PointerProperty(type=MPMEmitterSettings)
     collider: bpy.props.PointerProperty(type=MPMColliderSettings)

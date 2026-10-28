@@ -14,6 +14,14 @@ def test_role_defaults(clean_scene):
     assert d.auto_surface is True
 
 
+def test_domain_role_hides_from_render(clean_scene):
+    ob = add_cube("Domain")
+    ob.mpm.role = "DOMAIN"
+    assert ob.hide_render and ob.display_type == "WIRE"
+    ob.mpm.role = "COLLIDER"
+    assert not ob.hide_render and ob.display_type == "TEXTURED"
+
+
 def test_preset_enum_lists_presets(clean_scene):
     e = add_cube("Emitter").mpm.emitter
     items = e.bl_rna.properties["preset"].enum_items

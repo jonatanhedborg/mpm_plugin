@@ -12,7 +12,8 @@ Get Extensions → (dropdown) Install from Disk, and pick `dist/mpm_blender-0.1.
 
 Workflow, all in the Properties editor's Physics tab, MPM panel:
 
-1. Add a box, set Role to **Domain**. Set resolution, quality (Preview = half resolution), walls.
+1. Add a box, set Role to **Domain** (it becomes a wireframe and is hidden from renders). Set resolution,
+   quality (Preview = half resolution), walls.
 2. Add meshes, set Role to **Emitter**: Fill or Inflow, pick a material preset, tweak it. Display &
    Surface picks points or a surface mesh (Auto follows the preset).
 3. Optionally add meshes with Role **Collider** (animated objects work).
