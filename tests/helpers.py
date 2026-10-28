@@ -72,6 +72,65 @@ def icosphere(radius: float, subdivisions: int) -> tuple[np.ndarray, np.ndarray]
     return (np.array(verts) * radius).astype(np.float32), np.array(f, np.int32)
 
 
+def box_particles(lo, hi, dx: float, seed: int = 0) -> np.ndarray:
+    """Particles filling the box [lo, hi] at 8 per cell (spacing dx/2)."""
+    from mpm_core.geometry import sample_mesh_volume, transform_points
+
+    v, t = unit_cube_mesh()
+    size = np.subtract(hi, lo)
+    m = translate(*lo) @ scale(*size)
+    return sample_mesh_volume(transform_points(m, v), t, dx / 2, seed)
+
+
+def sphere_particles(center, radius: float, dx: float, seed: int = 0) -> np.ndarray:
+    from mpm_core.geometry import sample_mesh_volume
+
+    v, t = icosphere(radius, 4)
+    return sample_mesh_volume(v + np.asarray(center, np.float32), t, dx / 2, seed)
+
+
+def make_solver(device, domain, materials, gravity=(0.0, 0.0, -9.81)):
+    from mpm_core.backends import create_solver
+
+    return create_solver("warp", domain=domain, materials=list(materials), gravity=gravity, device=device)
+
+
+def add(solver, positions, material_id: int = 0, emitter_id: int = 0) -> None:
+    n = len(positions)
+    solver.add_particles(positions, np.zeros_like(positions), np.full(n, material_id, np.int32),
+                         np.full(n, emitter_id, np.int32))
+
+
+def solver_with_box(device, domain, material, lo, hi):
+    s = make_solver(device, domain, [material])
+    add(s, box_particles(lo, hi, domain.dx))
+    return s
+
+
+def solver_with_cube(device, domain, lo, hi):
+    """Jelly box (the plan calls it a cube even when it isn't one)."""
+    return solver_with_box(device, domain, load_preset("jelly").material, lo, hi)
+
+
+def solver_with_sphere(device, domain, material, center, radius):
+    s = make_solver(device, domain, [material])
+    add(s, sphere_particles(center, radius, domain.dx))
+    return s
+
+
+def solver_with_presets(device, domain, boxes):
+    """boxes: [(preset_id, lo, hi)]; material and emitter id = list index."""
+    s = make_solver(device, domain, [load_preset(p).material for p, _, _ in boxes])
+    for i, (_, lo, hi) in enumerate(boxes):
+        add(s, box_particles(lo, hi, domain.dx, seed=i), material_id=i, emitter_id=i)
+    return s
+
+
+def run(solver, frames: int, fps: float = 24.0) -> None:
+    for _ in range(frames):
+        solver.advance(1.0 / fps)
+
+
 def small_scene(frame_end: int = 10, gravity=(0.0, 0.0, -9.81), particles_per_cell: int = 8,
                 emitter_frames: int | None = None, emitter_offset=(0.0, 0.0, 0.0), kind: str = "fill",
                 velocity=(0.0, 0.0, 0.0), emit_frames: tuple[int, int] | None = None,
