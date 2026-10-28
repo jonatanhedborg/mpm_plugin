@@ -1,7 +1,7 @@
 # GPU MPM Solver for Blender: Design
 
 Date: 2026-10-28
-Status: draft for review
+Status: approved; solver core implemented. Revised 2026-10-28: surfacing is a separate stage (see Surfacer).
 
 ## Intent
 
@@ -59,7 +59,7 @@ A throwaway spike (`spike/`) already proved the core idea. Its findings are summ
    Each emitter picks a material (a preset, possibly tweaked) and belongs to one domain. **The material lives on the emitter**: preset choice and tweaks are emitter properties, and each emitter is its own entry in the solver's material table and gets its own output object. Two emitters using the same preset are still two materials and two output objects, so they can have different tweaks and shaders. *My call (matches the author's description of configuring material per object).*
 3. **Colliders.** Enable "MPM Collider" on any mesh. Static or animated by its object transform. Friction setting (sticky to slippery). Closed meshes are solid; open meshes (e.g. a plane) act as one-sided surfaces. *My call: the domain's own floor and walls are optional built-in colliders (toggle per side), so a simple scene needs no extra objects.*
 4. **Bake.** Press Bake in the domain panel. A progress bar shows frame, time per frame and particle count. Cancel stops cleanly. Bake can resume from the last completed frame. Already-baked frames can be scrubbed while the bake continues.
-5. **View and render.** Each emitter gets its own output object in a collection next to the domain. Scrubbing the timeline loads cached frames. Each output object has its preset's render material, which the user can replace. Surface meshing settings (smoothness, detail) are adjustable after baking without re-simulating.
+5. **View and render.** Each emitter gets its own output object in a collection next to the domain. Scrubbing the timeline loads cached frames. Each output object has its preset's render material, which the user can replace. Surface meshing is a separate "Bake surface" step after the simulation bake (like Blender fluid's "Bake Mesh"); its settings (smoothness, detail) can be changed and re-baked without re-simulating.
 
 ## Presets
 
@@ -86,16 +86,17 @@ Presets need to work across scene scales; the spike showed that cream with a fix
 
 ## Architecture
 
-Three layers with a hard boundary between each:
+Three layers with a hard boundary between each, plus a separate surfacing stage that only reads the particle cache:
 
 ```
 Blender add-on (bpy)      UI, object roles, presets, scene export, cache loading, display
-        │  scene description on disk (JSON + .npy)
-        ▼
-Bake runner (subprocess)  reads scene description, drives the solver, writes the cache
-        │  Python solver interface, numpy arrays only
-        ▼
-Backend (Warp in v1)      GPU kernels: P2G, grid update, colliders, G2P, plasticity
+        │  scene description on disk (JSON + .npy)          ▲ particle cache   ▲ mesh cache
+        ▼                                                   │                  │
+Bake runner (subprocess)  ───── writes particle cache ──────┤                  │
+        │  Python solver interface, numpy arrays only       │                  │
+        ▼                                                   ▼                  │
+Backend (Warp in v1)      GPU kernels               Surfacer (subprocess) ─────┘
+                                                    particles → meshes, GPU
 ```
 
 **Add-on.** Pure bpy. Never imports Warp. Exports the scene description, launches the runner, polls progress, loads cache frames.
@@ -110,7 +111,9 @@ Backend (Warp in v1)      GPU kernels: P2G, grid update, colliders, G2P, plastic
 
 **Cache.** Per frame, per material: particle positions (float32), plus attributes useful for shading (velocity at least; *my call*). Format is backend-independent and documented. Readable while the bake is still writing later frames. Preview and final bakes go to separate cache subdirectories so a preview never overwrites a final bake. *My call.*
 
-**Display.** One output object per material, driven by a frame-change handler that loads the cached frame. Points are displayed via Geometry Nodes (mesh-to-points or a PointCloud, builder's call). Surface meshing for mesh-display materials runs in Geometry Nodes (Points to Volume, Volume to Mesh, smoothing) so it stays adjustable without re-simulating. *My call: start with Geometry Nodes surfacing; consider an external mesher like splashsurf only if quality or speed is not good enough.* For final renders, the user may want baked mesh output; builder decides whether v1 includes a "bake surface" step.
+**Surfacer.** A separate stage and package (`mpm_surface`, same repo) that turns the particle cache into a mesh cache. *Decided by the author:* surfacing is neither part of the add-on nor of the solver. It depends only on the particle cache format, never on the solver or its backend; it runs as a subprocess from the add-on (progress, cancel, like the bake runner) or from the command line / a farm. Re-running with new settings never re-simulates, and frames whose particles and settings haven't changed are skipped. Per-emitter settings (on/off, detail, smoothing). Meshes carry a per-vertex velocity attribute for motion blur. v1 builds a particle density field on the GPU and runs Warp's marching cubes; an external mesher (e.g. splashsurf, anisotropic kernels) can be a second backend later if quality demands it. No Geometry Nodes surfacing path, to avoid two results that look slightly different.
+
+**Display.** One output object per emitter, driven by a frame-change handler that loads the cached frame: the mesh cache for mesh-display emitters (once surfaced), points otherwise. Points are displayed via Geometry Nodes (mesh-to-points or a PointCloud, builder's call).
 
 ## Requirements carried over from the spike
 
